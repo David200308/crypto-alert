@@ -1,0 +1,19 @@
+[
+  {
+    "symbol": "BTC/USD",
+    "price_feed_id": "0xe62df6c8b4a85fe1a67db44dc12de5db330f7ac66b72dc658afedf0f4a415b43",
+    "threshold": 100000.0,
+    "direction": ">=",
+    "enabled": true,
+    "recipient_email": "your-email@example.com"
+  },
+  {
+    "symbol": "ETH/USD",
+    "price_feed_id": "0xff61491a931112ddf1bd8147cd1b641375f79f5825126d665480874634fd0ace",
+    "threshold": 5000.0,
+    "direction": "<=",
+    "enabled": true,
+    "recipient_email": "your-email@example.com"
+  }
+]
+

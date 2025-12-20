@@ -7,17 +7,6 @@ import (
 	"crypto-alert/internal/price"
 )
 
-// AlertRule defines a price alert rule
-type AlertRule struct {
-	Symbol         string
-	PriceFeedID    string // Pyth price feed ID for this symbol
-	Threshold      float64
-	Direction      Direction // >=, >, =, <=, <
-	Enabled        bool
-	RecipientEmail string // Email address to send alerts to
-	LastTriggered  *time.Time
-}
-
 // Direction indicates the comparison operator for price threshold
 type Direction string
 
@@ -28,6 +17,33 @@ const (
 	DirectionLessThanOrEqual    Direction = "<="
 	DirectionLessThan           Direction = "<"
 )
+
+// FrequencyUnit represents the unit for frequency
+type FrequencyUnit string
+
+const (
+	FrequencyUnitDay  FrequencyUnit = "DAY"
+	FrequencyUnitHour FrequencyUnit = "HOUR"
+	FrequencyUnitOnce FrequencyUnit = "ONCE"
+)
+
+// Frequency represents the frequency configuration for an alert rule
+type Frequency struct {
+	Number int           // Number of units (required for DAY/HOUR, ignored for ONCE)
+	Unit   FrequencyUnit // DAY, HOUR, or ONCE
+}
+
+// AlertRule defines a price alert rule
+type AlertRule struct {
+	Symbol         string
+	PriceFeedID    string // Pyth price feed ID for this symbol
+	Threshold      float64
+	Direction      Direction // >=, >, =, <=, <
+	Enabled        bool
+	RecipientEmail string // Email address to send alerts to
+	LastTriggered  *time.Time
+	Frequency      *Frequency // Optional frequency configuration
+}
 
 // AlertDecision represents the result of evaluating an alert rule
 type AlertDecision struct {
@@ -141,10 +157,38 @@ func (e *DecisionEngine) Evaluate(priceData *price.PriceData) []*AlertDecision {
 		}
 
 		if shouldAlert {
-			// Check if we should suppress duplicate alerts (e.g., within 1 hour)
-			if rule.LastTriggered != nil {
-				if time.Since(*rule.LastTriggered) < time.Hour {
-					continue // Suppress duplicate alert
+			// Handle frequency-based alert suppression
+			if rule.Frequency != nil {
+				switch rule.Frequency.Unit {
+				case FrequencyUnitOnce:
+					// ONCE: If already triggered, disable the rule
+					if rule.LastTriggered != nil {
+						rule.Enabled = false
+						continue // Rule already triggered, don't alert again
+					}
+				case FrequencyUnitDay:
+					// DAY: Check if enough days have passed since last trigger
+					if rule.LastTriggered != nil {
+						requiredDuration := time.Duration(rule.Frequency.Number) * 24 * time.Hour
+						if time.Since(*rule.LastTriggered) < requiredDuration {
+							continue // Suppress duplicate alert - not enough time has passed
+						}
+					}
+				case FrequencyUnitHour:
+					// HOUR: Check if enough hours have passed since last trigger
+					if rule.LastTriggered != nil {
+						requiredDuration := time.Duration(rule.Frequency.Number) * time.Hour
+						if time.Since(*rule.LastTriggered) < requiredDuration {
+							continue // Suppress duplicate alert - not enough time has passed
+						}
+					}
+				}
+			} else {
+				// Default behavior: suppress duplicate alerts within 1 hour if no frequency is specified
+				if rule.LastTriggered != nil {
+					if time.Since(*rule.LastTriggered) < time.Hour {
+						continue // Suppress duplicate alert
+					}
 				}
 			}
 

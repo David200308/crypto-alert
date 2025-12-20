@@ -42,14 +42,30 @@ func LoadConfig() (*Config, error) {
 	return config, nil
 }
 
+// FrequencyUnit represents the unit for frequency
+type FrequencyUnit string
+
+const (
+	FrequencyUnitDay  FrequencyUnit = "DAY"
+	FrequencyUnitHour FrequencyUnit = "HOUR"
+	FrequencyUnitOnce FrequencyUnit = "ONCE"
+)
+
+// FrequencyConfig represents the frequency configuration for an alert rule
+type FrequencyConfig struct {
+	Number *int          `json:"number,omitempty"` // Required for DAY and HOUR, not needed for ONCE
+	Unit   FrequencyUnit `json:"unit"`             // DAY, HOUR, or ONCE
+}
+
 // AlertRuleConfig represents an alert rule in JSON format
 type AlertRuleConfig struct {
-	Symbol         string  `json:"symbol"`
-	PriceFeedID    string  `json:"price_feed_id"` // Pyth price feed ID for this symbol
-	Threshold      float64 `json:"threshold"`
-	Direction      string  `json:"direction"` // ">=", ">", "=", "<=", "<"
-	Enabled        bool    `json:"enabled"`
-	RecipientEmail string  `json:"recipient_email"` // Email address to send alerts to
+	Symbol         string          `json:"symbol"`
+	PriceFeedID    string          `json:"price_feed_id"` // Pyth price feed ID for this symbol
+	Threshold      float64         `json:"threshold"`
+	Direction      string          `json:"direction"` // ">=", ">", "=", "<=", "<"
+	Enabled        bool            `json:"enabled"`
+	RecipientEmail string          `json:"recipient_email"` // Email address to send alerts to
+	Frequency      *FrequencyConfig `json:"frequency,omitempty"` // Optional frequency configuration
 }
 
 // LoadAlertRules loads alert rules from a JSON file
@@ -111,6 +127,31 @@ func LoadAlertRules(filePath string) ([]*core.AlertRule, error) {
 			return nil, fmt.Errorf("price_feed_id is required for symbol %s", rc.Symbol)
 		}
 
+		// Validate frequency configuration
+		var frequency *core.Frequency
+		if rc.Frequency != nil {
+			// Validate unit
+			switch rc.Frequency.Unit {
+			case FrequencyUnitDay, FrequencyUnitHour:
+				// DAY and HOUR require a number
+				if rc.Frequency.Number == nil || *rc.Frequency.Number <= 0 {
+					return nil, fmt.Errorf("frequency.number is required and must be positive for unit %s in symbol %s", rc.Frequency.Unit, rc.Symbol)
+				}
+				frequency = &core.Frequency{
+					Number: *rc.Frequency.Number,
+					Unit:   core.FrequencyUnit(rc.Frequency.Unit),
+				}
+			case FrequencyUnitOnce:
+				// ONCE does not require a number
+				frequency = &core.Frequency{
+					Number: 0, // Not used for ONCE
+					Unit:   core.FrequencyUnitOnce,
+				}
+			default:
+				return nil, fmt.Errorf("invalid frequency.unit '%s' for symbol %s, must be one of: DAY, HOUR, ONCE", rc.Frequency.Unit, rc.Symbol)
+			}
+		}
+
 		rules = append(rules, &core.AlertRule{
 			Symbol:         rc.Symbol,
 			PriceFeedID:    rc.PriceFeedID,
@@ -118,6 +159,7 @@ func LoadAlertRules(filePath string) ([]*core.AlertRule, error) {
 			Direction:      direction,
 			Enabled:        rc.Enabled,
 			RecipientEmail: rc.RecipientEmail,
+			Frequency:      frequency,
 		})
 	}
 

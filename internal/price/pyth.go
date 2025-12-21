@@ -8,6 +8,7 @@ import (
 	"log"
 	"math"
 	"net/http"
+	"strconv"
 	"time"
 )
 
@@ -111,17 +112,21 @@ func (c *PythClient) GetPrice(ctx context.Context, symbol string, priceFeedID st
 
 	priceInfo := apiResponse.Parsed[0].Price
 
-	// Parse price (price is typically in fixed-point format with expo)
-	// Price comes as a string integer, need to parse and adjust for exponent
-	var priceInt int64
-	fmt.Sscanf(priceInfo.Price, "%d", &priceInt)
+	// Parse price (price is in fixed-point format with expo)
+	// Price comes as a string integer, parse it exactly and adjust for exponent
+	priceInt, err := strconv.ParseInt(priceInfo.Price, 10, 64)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse price for %s: %w", symbol, err)
+	}
 
-	// Convert to float and adjust for exponent (10^expo)
+	// Convert to float and adjust for exponent (10^expo) - use exact calculation
 	price := float64(priceInt) * math.Pow(10, float64(priceInfo.Expo))
 
 	// Parse confidence (same format)
-	var confInt int64
-	fmt.Sscanf(priceInfo.Conf, "%d", &confInt)
+	confInt, err := strconv.ParseInt(priceInfo.Conf, 10, 64)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse confidence for %s: %w", symbol, err)
+	}
 	confidence := float64(confInt) * math.Pow(10, float64(priceInfo.Expo))
 
 	// Convert publish time to timestamp

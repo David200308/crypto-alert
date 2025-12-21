@@ -142,7 +142,7 @@ func checkAndAlert(
 			log.Printf("⚠️  Invalid price data for %s: %v", symbol, err)
 			continue
 		}
-		log.Printf("💰 %s: $%.2f (confidence: %.2f)", symbol, priceData.Price, priceData.Confidence)
+		log.Printf("💰 %s: $%g (confidence: %g)", symbol, priceData.Price, priceData.Confidence)
 	}
 
 	// Evaluate alert rules

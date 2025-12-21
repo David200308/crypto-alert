@@ -22,7 +22,7 @@ type EmailTemplateData struct {
 
 // FormatAlertSubject formats the email subject for an alert
 func FormatAlertSubject(symbol string, price float64, threshold float64, direction string) string {
-	return fmt.Sprintf("🚨 Crypto Alert: %s %s $%.2f", symbol, direction, threshold)
+	return fmt.Sprintf("🚨 Crypto Alert: %s %s $%g", symbol, direction, threshold)
 }
 
 // FormatAlertMessage formats the plain text message for an alert
@@ -46,10 +46,10 @@ func FormatAlertMessage(symbol string, price float64, threshold float64, directi
 	return fmt.Sprintf(`Crypto Alert Triggered!
 
 Symbol: %s
-Current Price: $%.2f
-Threshold: $%.2f
+Current Price: $%g
+Threshold: $%g
 Condition: Price is %s threshold
-Confidence: %.2f%%
+Confidence: %g%%
 Timestamp: %s
 
 This is an automated alert from your crypto price monitoring system.
@@ -161,12 +161,12 @@ func FormatAlertHTML(symbol string, price float64, threshold float64, direction 
 		Timestamp      string
 	}{
 		Symbol:         symbol,
-		Price:          fmt.Sprintf("%.2f", price),
-		Threshold:      fmt.Sprintf("%.2f", threshold),
+		Price:          fmt.Sprintf("%g", price),
+		Threshold:      fmt.Sprintf("%g", threshold),
 		DirectionText:  directionText,
 		DirectionEmoji: directionEmoji,
 		PriceColor:     priceColor,
-		Confidence:     fmt.Sprintf("%.2f", confidence*100),
+		Confidence:     fmt.Sprintf("%g", confidence*100),
 		Timestamp:      timestamp.Format(time.RFC3339),
 	}
 
@@ -179,10 +179,10 @@ func FormatAlertHTML(symbol string, price float64, threshold float64, direction 
 		<body>
 			<h1>🚨 Crypto Alert</h1>
 			<h2>%s Alert Triggered</h2>
-			<p><strong>Current Price:</strong> $%.2f</p>
-			<p><strong>Threshold:</strong> $%.2f</p>
+			<p><strong>Current Price:</strong> $%g</p>
+			<p><strong>Threshold:</strong> $%g</p>
 			<p><strong>Condition:</strong> Price is %s threshold</p>
-			<p><strong>Confidence:</strong> %.2f%%</p>
+			<p><strong>Confidence:</strong> %g%%</p>
 			<p><strong>Timestamp:</strong> %s</p>
 		</body>
 		</html>
@@ -197,10 +197,10 @@ func FormatAlertHTML(symbol string, price float64, threshold float64, direction 
 		<body>
 			<h1>🚨 Crypto Alert</h1>
 			<h2>%s Alert Triggered</h2>
-			<p><strong>Current Price:</strong> $%.2f</p>
-			<p><strong>Threshold:</strong> $%.2f</p>
+			<p><strong>Current Price:</strong> $%g</p>
+			<p><strong>Threshold:</strong> $%g</p>
 			<p><strong>Condition:</strong> Price is %s threshold</p>
-			<p><strong>Confidence:</strong> %.2f%%</p>
+			<p><strong>Confidence:</strong> %g%%</p>
 			<p><strong>Timestamp:</strong> %s</p>
 		</body>
 		</html>

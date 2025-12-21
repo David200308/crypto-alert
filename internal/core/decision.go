@@ -106,7 +106,7 @@ func (e *DecisionEngine) Evaluate(priceData *price.PriceData) []*AlertDecision {
 			if priceData.Price >= rule.Threshold {
 				shouldAlert = true
 				message = fmt.Sprintf(
-					"🚨 Alert: %s price is %.2f, which is >= threshold of %.2f",
+					"🚨 Alert: %s price is %g, which is >= threshold of %g",
 					priceData.Symbol,
 					priceData.Price,
 					rule.Threshold,
@@ -116,7 +116,7 @@ func (e *DecisionEngine) Evaluate(priceData *price.PriceData) []*AlertDecision {
 			if priceData.Price > rule.Threshold {
 				shouldAlert = true
 				message = fmt.Sprintf(
-					"🚨 Alert: %s price is %.2f, which is > threshold of %.2f",
+					"🚨 Alert: %s price is %g, which is > threshold of %g",
 					priceData.Symbol,
 					priceData.Price,
 					rule.Threshold,
@@ -128,7 +128,7 @@ func (e *DecisionEngine) Evaluate(priceData *price.PriceData) []*AlertDecision {
 			if priceData.Price >= rule.Threshold-epsilon && priceData.Price <= rule.Threshold+epsilon {
 				shouldAlert = true
 				message = fmt.Sprintf(
-					"🚨 Alert: %s price is %.2f, which equals threshold of %.2f",
+					"🚨 Alert: %s price is %g, which equals threshold of %g",
 					priceData.Symbol,
 					priceData.Price,
 					rule.Threshold,
@@ -138,7 +138,7 @@ func (e *DecisionEngine) Evaluate(priceData *price.PriceData) []*AlertDecision {
 			if priceData.Price <= rule.Threshold {
 				shouldAlert = true
 				message = fmt.Sprintf(
-					"🚨 Alert: %s price is %.2f, which is <= threshold of %.2f",
+					"🚨 Alert: %s price is %g, which is <= threshold of %g",
 					priceData.Symbol,
 					priceData.Price,
 					rule.Threshold,
@@ -148,7 +148,7 @@ func (e *DecisionEngine) Evaluate(priceData *price.PriceData) []*AlertDecision {
 			if priceData.Price < rule.Threshold {
 				shouldAlert = true
 				message = fmt.Sprintf(
-					"🚨 Alert: %s price is %.2f, which is < threshold of %.2f",
+					"🚨 Alert: %s price is %g, which is < threshold of %g",
 					priceData.Symbol,
 					priceData.Price,
 					rule.Threshold,

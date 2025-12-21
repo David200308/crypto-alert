@@ -9,6 +9,7 @@ import (
 	"math"
 	"net/http"
 	"strconv"
+	"sync"
 	"time"
 )
 
@@ -142,21 +143,37 @@ func (c *PythClient) GetPrice(ctx context.Context, symbol string, priceFeedID st
 	return priceData, nil
 }
 
-// GetMultiplePrices fetches prices for multiple symbols using their price feed IDs
+// GetMultiplePrices fetches prices for multiple symbols using their price feed IDs concurrently
 // symbolToFeedID maps symbol (e.g., "BTC/USD") to its Pyth price feed ID
 // If a price fetch fails for a symbol, it is skipped and logged, but the function continues
+// Uses goroutines to fetch prices in parallel for better performance
 func (c *PythClient) GetMultiplePrices(ctx context.Context, symbolToFeedID map[string]string) (map[string]*PriceData, error) {
 	prices := make(map[string]*PriceData)
+	var mu sync.Mutex
+	var wg sync.WaitGroup
 
+	// Fetch prices concurrently using goroutines
 	for symbol, feedID := range symbolToFeedID {
-		priceData, err := c.GetPrice(ctx, symbol, feedID)
-		if err != nil {
-			// Log error but continue with other symbols
-			log.Printf("⚠️  Failed to fetch price for %s: %v", symbol, err)
-			continue
-		}
-		prices[symbol] = priceData
+		wg.Add(1)
+		go func(sym string, fid string) {
+			defer wg.Done()
+
+			priceData, err := c.GetPrice(ctx, sym, fid)
+			if err != nil {
+				// Log error but continue with other symbols
+				log.Printf("⚠️  Failed to fetch price for %s: %v", sym, err)
+				return
+			}
+
+			// Safely add to map using mutex
+			mu.Lock()
+			prices[sym] = priceData
+			mu.Unlock()
+		}(symbol, feedID)
 	}
+
+	// Wait for all goroutines to complete
+	wg.Wait()
 
 	return prices, nil
 }

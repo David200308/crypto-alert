@@ -1,27 +1,54 @@
 # Crypto Alert System
 
-A Go-based cryptocurrency price alert system that monitors prices from Pyth Oracle and sends alerts when price thresholds are met.
+A Go-based Cryptocurrency price / DeFi protocol data alert system that monitors prices from Oracle / protocol contract and sends alerts when thresholds are met.
 
 ## Project Structure
 
 ```
 crypto-alert/
-├── cmd/
-│   └── main.go              # Main application entry point
-├── internal/
-│   ├── config/              # Configuration management
+├── alert-rules.json
+├── cmd
+│   └── main.go
+├── go.mod
+├── go.sum
+├── internal
+│   ├── config
 │   │   └── config.go
-│   ├── core/                # Core decision engine
+│   ├── core
+│   │   ├── decision_test.go
 │   │   └── decision.go
-│   ├── message/             # Email sending module (Resend integration)
+│   ├── defi
+│   │   ├── aave
+│   │   │   ├── abi
+│   │   │   │   ├── erc20.json
+│   │   │   │   └── pool.json
+│   │   │   └── v3.go
+│   │   └── morpho
+│   │       ├── abi
+│   │       │   ├── erc20.json
+│   │       │   └── market.json
+│   │       ├── market_v1.go
+│   │       └── vault_v1.go
+│   ├── message
+│   │   ├── email_template.go
 │   │   └── sender.go
-│   │   └── email_template.go
-│   └── price/               # Pyth oracle price query module
+│   └── price
 │       └── pyth.go
-├── .env.example             # Example environment configuration
-├── go.mod                   # Go module definition
+├── Makefile
 └── README.md
 ```
+
+## Token Price Oracle Integration
+
+- Pyth
+
+## DeFi Integration
+
+| DeFi Protocol | Market / Vault | Version | Chain          | TVL  | APY  | UTILIZATION | LIQUIDITY |
+| ------------- | -------------- | ------- | -------------- | ---- | ---- | ----------- | --------- |
+| AAVE          | Market         | V3      | ETH, Base, ARB | ✔️ | ✔️ | ✔️        | ✔️      |
+| Morpho        | Market         | V1      | ETH, Base, ARB | ✔️ | ❌   | ✔️        | ✔️      |
+| Morpho        | Vault          | V1      | ETH, Base, ARB | ✔️ | ✔️ | ✔️        | ✔️      |
 
 ## Installation
 

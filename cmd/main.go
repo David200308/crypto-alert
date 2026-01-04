@@ -161,9 +161,9 @@ func checkAndAlert(
 		if decision.ShouldAlert {
 			log.Printf("🚨 Alert triggered: %s", decision.Message)
 			// Send email to the recipient specified in the alert rule using formatted template
-			if err := sender.SendAlert(decision.Rule.RecipientEmail, decision); err != nil {
-				log.Printf("❌ Failed to send alert to %s: %v", decision.Rule.RecipientEmail, err)
-			}
+			// if err := sender.SendAlert(decision.Rule.RecipientEmail, decision); err != nil {
+			// 	log.Printf("❌ Failed to send alert to %s: %v", decision.Rule.RecipientEmail, err)
+			// }
 		}
 	}
 

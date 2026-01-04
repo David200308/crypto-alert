@@ -192,5 +192,22 @@
       "unit": "ONCE"
     },
     "recipient_email": ""
+  },
+  {
+    "protocol": "kamino",
+    "category": "vault",
+    "version": "v2",
+    "chain_id": "solana",
+    "vault_name": "USDC Prime",
+    "vault_token_address": "HDsayqAsDWy3QvANGqh2yNraqcD8Fnjgh73Mhb3WRS5E",
+    "deposit_token_contract": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+    "field": "TVL",
+    "direction": "<=",
+    "threshold": 100000000,
+    "enabled": true,
+    "frequency": {
+      "unit": "ONCE"
+    },
+    "recipient_email": ""
   }
 ]

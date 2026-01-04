@@ -10,6 +10,7 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 
 	"crypto-alert/internal/defi/aave"
+	"crypto-alert/internal/defi/kamino"
 	"crypto-alert/internal/defi/morpho"
 )
 
@@ -45,6 +46,14 @@ func (cm *ClientManager) Close() {
 				c.Close()
 			}
 		case *morpho.MorphoV1VaultClient:
+			if c != nil {
+				c.Close()
+			}
+		case *morpho.MorphoV2VaultClient:
+			if c != nil {
+				c.Close()
+			}
+		case *kamino.KaminoVaultClient:
 			if c != nil {
 				c.Close()
 			}
@@ -153,8 +162,88 @@ func (cm *ClientManager) GetFieldValue(ctx context.Context, rule *core.DeFiAlert
 			return 0, "", fmt.Errorf("invalid category '%s' for Morpho protocol (must be 'market' or 'vault')", rule.Category)
 		}
 
+	} else if rule.Protocol == "morpho" && rule.Version == "v2" {
+		// Handle Morpho v2
+		if rule.Category == "vault" {
+			key := clientKey{protocol: "morpho", category: "vault", chainID: rule.ChainID}
+			client, ok := cm.clients[key].(*morpho.MorphoV2VaultClient)
+			if !ok {
+				vaultToken := rule.VaultTokenAddress
+				if vaultToken == "" {
+					vaultToken = rule.MarketTokenContract
+				}
+				depositToken := rule.DepositTokenContract
+				if vaultToken == "" || depositToken == "" {
+					return 0, "", fmt.Errorf("missing required fields for Morpho v2 vault: vault_token_address and deposit_token_contract are required")
+				}
+				client, err = morpho.NewMorphoV2VaultClient(rule.ChainID, vaultToken, depositToken)
+				if err != nil {
+					return 0, "", fmt.Errorf("failed to create Morpho v2 vault client for chain %s: %w", rule.ChainID, err)
+				}
+				cm.clients[key] = client
+			}
+
+			chainName, err = morpho.GetChainNameFromID(rule.ChainID)
+			if err != nil {
+				return 0, "", fmt.Errorf("failed to get chain name for chain %s: %w", rule.ChainID, err)
+			}
+
+			fieldType := morpho.VaultFieldType(rule.Field)
+			value, err = client.GetFieldValue(ctx, fieldType)
+			if err != nil {
+				vaultDisplay := rule.VaultTokenAddress
+				if rule.VaultName != "" {
+					vaultDisplay = rule.VaultName
+				}
+				return 0, chainName, fmt.Errorf("failed to fetch %s for Morpho v2 vault %s on %s: %w", rule.Field, vaultDisplay, chainName, err)
+			}
+
+		} else {
+			return 0, "", fmt.Errorf("invalid category '%s' for Morpho v2 protocol (must be 'vault')", rule.Category)
+		}
+
+	} else if rule.Protocol == "kamino" {
+		// Handle Kamino vault
+		if rule.Category == "vault" {
+			key := clientKey{protocol: "kamino", category: "vault", chainID: rule.ChainID}
+			client, ok := cm.clients[key].(*kamino.KaminoVaultClient)
+			if !ok {
+				vaultPubkey := rule.VaultTokenAddress
+				if vaultPubkey == "" {
+					vaultPubkey = rule.MarketTokenContract
+				}
+				depositTokenMint := rule.DepositTokenContract
+				if vaultPubkey == "" || depositTokenMint == "" {
+					return 0, "", fmt.Errorf("missing required fields for Kamino vault: vault_token_address and deposit_token_contract are required")
+				}
+				client, err = kamino.NewKaminoVaultClient(rule.ChainID, vaultPubkey, depositTokenMint)
+				if err != nil {
+					return 0, "", fmt.Errorf("failed to create Kamino vault client for chain %s: %w", rule.ChainID, err)
+				}
+				cm.clients[key] = client
+			}
+
+			chainName, err = kamino.GetChainNameFromID(rule.ChainID)
+			if err != nil {
+				return 0, "", fmt.Errorf("failed to get chain name for chain %s: %w", rule.ChainID, err)
+			}
+
+			fieldType := kamino.VaultFieldType(rule.Field)
+			value, err = client.GetFieldValue(ctx, fieldType)
+			if err != nil {
+				vaultDisplay := rule.VaultTokenAddress
+				if rule.VaultName != "" {
+					vaultDisplay = rule.VaultName
+				}
+				return 0, chainName, fmt.Errorf("failed to fetch %s for Kamino vault %s on %s: %w", rule.Field, vaultDisplay, chainName, err)
+			}
+
+		} else {
+			return 0, "", fmt.Errorf("invalid category '%s' for Kamino protocol (must be 'vault')", rule.Category)
+		}
+
 	} else {
-		return 0, "", fmt.Errorf("unsupported protocol: %s %s (supported: aave v3, morpho v1)", rule.Protocol, rule.Version)
+		return 0, "", fmt.Errorf("unsupported protocol: %s %s (supported: aave v3, morpho v1, morpho v2, kamino)", rule.Protocol, rule.Version)
 	}
 
 	return value, chainName, nil
@@ -167,6 +256,8 @@ func GetChainName(protocol, chainID string) (string, error) {
 		return aave.GetChainNameFromID(chainID)
 	case "morpho":
 		return morpho.GetChainNameFromID(chainID)
+	case "kamino":
+		return kamino.GetChainNameFromID(chainID)
 	default:
 		return "", fmt.Errorf("unsupported protocol: %s", protocol)
 	}
@@ -179,6 +270,8 @@ func GetDisplayName(rule *core.DeFiAlertRule) string {
 	} else if rule.Protocol == "morpho" && rule.Category == "market" && rule.MarketTokenPair != "" {
 		return " (" + rule.MarketTokenPair + ")"
 	} else if rule.Protocol == "morpho" && rule.Category == "vault" && rule.VaultName != "" {
+		return " (" + rule.VaultName + ")"
+	} else if rule.Protocol == "kamino" && rule.Category == "vault" && rule.VaultName != "" {
 		return " (" + rule.VaultName + ")"
 	}
 	return ""
@@ -194,7 +287,7 @@ func GetCategoryString(rule *core.DeFiAlertRule) string {
 
 // GetIdentifier returns the identifier for a DeFi rule (used for evaluation)
 func GetIdentifier(rule *core.DeFiAlertRule) string {
-	if rule.Protocol == "morpho" && rule.Category == "vault" && rule.VaultTokenAddress != "" {
+	if (rule.Protocol == "morpho" || rule.Protocol == "kamino") && rule.Category == "vault" && rule.VaultTokenAddress != "" {
 		return rule.VaultTokenAddress
 	}
 	return rule.MarketTokenContract

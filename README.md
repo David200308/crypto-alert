@@ -23,12 +23,16 @@ crypto-alert/
 │   │   │   │   ├── erc20.json
 │   │   │   │   └── pool.json
 │   │   │   └── v3.go
+│   │   ├── defi.go
+│   │   ├── kamino
+│   │   │   └── vault_v2.go
 │   │   └── morpho
 │   │       ├── abi
 │   │       │   ├── erc20.json
 │   │       │   └── market.json
 │   │       ├── market_v1.go
-│   │       └── vault_v1.go
+│   │       ├── vault_v1.go
+│   │       └── vault_v2.go
 │   ├── message
 │   │   ├── email_template.go
 │   │   └── sender.go
@@ -49,6 +53,8 @@ crypto-alert/
 | AAVE          | Market         | V3      | ETH, Base, ARB | ✔️ | ✔️ | ✔️        | ✔️      |
 | Morpho        | Market         | V1      | ETH, Base, ARB | ✔️ | ❌   | ✔️        | ✔️      |
 | Morpho        | Vault          | V1      | ETH, Base, ARB | ✔️ | ✔️ | ✔️        | ✔️      |
+| Morpho        | Vault          | V2      | ETH, Base, ARB | ✔️ | ✔️ | ✔️        | ✔️      |
+| Kamino        | Vault          | V2      | Solana         | ✔️ | ✔️ | ✔️        | ✔️      |
 
 ## Installation
 

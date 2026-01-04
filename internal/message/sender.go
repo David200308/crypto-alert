@@ -18,6 +18,7 @@ type MessageSender interface {
 	SendWithSubject(subject, message string) error
 	SendToEmail(toEmail, subject, message string) error
 	SendAlert(toEmail string, decision *core.AlertDecision) error
+	SendDeFiAlert(toEmail string, decision *core.DeFiAlertDecision) error
 }
 
 // ResendEmailSender sends alerts via Resend API
@@ -121,5 +122,11 @@ func (r *ResendEmailSender) SendToEmailWithHTML(toEmail, subject, textBody, html
 // SendAlert sends an alert email using the formatted template
 func (r *ResendEmailSender) SendAlert(toEmail string, decision *core.AlertDecision) error {
 	subject, textBody, htmlBody := FormatAlertEmail(decision)
+	return r.SendToEmailWithHTML(toEmail, subject, textBody, htmlBody)
+}
+
+// SendDeFiAlert sends a DeFi alert email using the formatted template
+func (r *ResendEmailSender) SendDeFiAlert(toEmail string, decision *core.DeFiAlertDecision) error {
+	subject, textBody, htmlBody := FormatDeFiAlertEmail(decision)
 	return r.SendToEmailWithHTML(toEmail, subject, textBody, htmlBody)
 }

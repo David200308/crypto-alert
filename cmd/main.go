@@ -11,8 +11,11 @@ import (
 
 	"crypto-alert/internal/config"
 	"crypto-alert/internal/core"
+	"crypto-alert/internal/defi/aave"
 	"crypto-alert/internal/message"
 	"crypto-alert/internal/price"
+
+	"github.com/ethereum/go-ethereum/common"
 )
 
 func main() {
@@ -49,11 +52,12 @@ func main() {
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
 
-	// Start the alert monitoring loop
+	// Start the alert monitoring loops
 	go monitorPrices(ctx, pythClient, decisionEngine, emailSender, cfg)
+	go monitorDeFi(ctx, decisionEngine, emailSender, cfg)
 
 	log.Println("🚀 Crypto Alert System started")
-	
+
 	// Get symbols from alert rules for logging
 	rules := decisionEngine.GetRules()
 	symbols := make([]string, 0)
@@ -63,8 +67,22 @@ func main() {
 		}
 	}
 	if len(symbols) > 0 {
-		log.Printf("📊 Monitoring symbols: %v", symbols)
-	} else {
+		log.Printf("📊 Monitoring price symbols: %v", symbols)
+	}
+
+	// Get DeFi rules for logging
+	defiRules := decisionEngine.GetDeFiRules()
+	if len(defiRules) > 0 {
+		log.Printf("📊 Monitoring DeFi protocols: %d rule(s)", len(defiRules))
+		for _, rule := range defiRules {
+			if rule.Enabled {
+				chainName, _ := aave.GetChainNameFromID(rule.ChainID)
+				log.Printf("  - %s %s on %s (%s): %s", rule.Protocol, rule.Version, chainName, rule.ChainID, rule.Field)
+			}
+		}
+	}
+
+	if len(symbols) == 0 && len(defiRules) == 0 {
 		log.Println("⚠️  No enabled alert rules found")
 	}
 	log.Printf("⏱️  Check interval: %d seconds", cfg.CheckInterval)
@@ -162,18 +180,142 @@ func checkAndAlert(
 	return nil
 }
 
+// monitorDeFi continuously monitors DeFi protocols and triggers alerts
+func monitorDeFi(
+	ctx context.Context,
+	decisionEngine *core.DecisionEngine,
+	sender message.MessageSender,
+	cfg *config.Config,
+) {
+	ticker := time.NewTicker(time.Duration(cfg.CheckInterval) * time.Second)
+	defer ticker.Stop()
+
+	// Run immediately on startup
+	if err := checkAndAlertDeFi(ctx, decisionEngine, sender); err != nil {
+		log.Printf("Error checking DeFi: %v", err)
+	}
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			if err := checkAndAlertDeFi(ctx, decisionEngine, sender); err != nil {
+				log.Printf("Error checking DeFi: %v", err)
+			}
+		}
+	}
+}
+
+// checkAndAlertDeFi checks DeFi values and sends alerts if conditions are met
+func checkAndAlertDeFi(
+	ctx context.Context,
+	decisionEngine *core.DecisionEngine,
+	sender message.MessageSender,
+) error {
+	defiRules := decisionEngine.GetDeFiRules()
+	if len(defiRules) == 0 {
+		return nil
+	}
+
+	// Group rules by chain ID and protocol
+	chainClients := make(map[string]*aave.AaveV3Client)
+	defer func() {
+		// Close all clients
+		for _, client := range chainClients {
+			if client != nil {
+				client.Close()
+			}
+		}
+	}()
+
+	log.Printf("🔍 Checking DeFi protocols for %d rule(s)...", len(defiRules))
+
+	for _, rule := range defiRules {
+		if !rule.Enabled {
+			continue
+		}
+
+		// Only support Aave v3 for now
+		if rule.Protocol != "aave" || rule.Version != "v3" {
+			log.Printf("⚠️  Unsupported protocol: %s %s (only aave v3 is supported)", rule.Protocol, rule.Version)
+			continue
+		}
+
+		// Get or create client for this chain
+		client, ok := chainClients[rule.ChainID]
+		if !ok {
+			var err error
+			client, err = aave.NewAaveV3Client(rule.ChainID)
+			if err != nil {
+				log.Printf("⚠️  Failed to create Aave client for chain %s: %v", rule.ChainID, err)
+				continue
+			}
+			chainClients[rule.ChainID] = client
+		}
+
+		// Get chain name
+		chainName, err := aave.GetChainNameFromID(rule.ChainID)
+		if err != nil {
+			log.Printf("⚠️  Failed to get chain name for chain %s: %v", rule.ChainID, err)
+			continue
+		}
+
+		// Parse token address
+		tokenAddress := common.HexToAddress(rule.MarketTokenContract)
+
+		// Parse field type
+		fieldType := aave.FieldType(rule.Field)
+
+		// Fetch field value
+		value, err := client.GetFieldValue(ctx, tokenAddress, fieldType)
+		if err != nil {
+			log.Printf("⚠️  Failed to fetch %s for token %s on %s: %v", rule.Field, rule.MarketTokenContract, chainName, err)
+			continue
+		}
+
+		log.Printf("💰 %s %s on %s - %s: %g", rule.Protocol, rule.Version, chainName, rule.Field, value)
+
+		// Evaluate alert rules
+		decisions := decisionEngine.EvaluateDeFi(rule.ChainID, rule.MarketTokenContract, rule.Field, value, chainName)
+
+		// Send alerts for triggered rules
+		for _, decision := range decisions {
+			if decision.ShouldAlert {
+				log.Printf("🚨 Alert triggered: %s", decision.Message)
+				// Send email to the recipient specified in the alert rule
+				if err := sender.SendDeFiAlert(decision.Rule.RecipientEmail, decision); err != nil {
+					log.Printf("❌ Failed to send alert to %s: %v", decision.Rule.RecipientEmail, err)
+				}
+			}
+		}
+	}
+
+	return nil
+}
+
 // loadAlertRules loads alert rules from JSON config file
 func loadAlertRules(engine *core.DecisionEngine, filePath string) error {
-	rules, err := config.LoadAlertRules(filePath)
+	priceRules, defiRules, err := config.LoadAlertRules(filePath)
 	if err != nil {
 		return fmt.Errorf("failed to load alert rules: %w", err)
 	}
 
-	// Add all rules to the decision engine
-	for _, rule := range rules {
+	// Add all price rules to the decision engine
+	for _, rule := range priceRules {
 		engine.AddRule(rule)
 	}
 
-	log.Printf("✅ Loaded %d alert rule(s) from %s", len(rules), filePath)
+	// Add all DeFi rules to the decision engine
+	for _, rule := range defiRules {
+		engine.AddDeFiRule(rule)
+	}
+
+	totalRules := len(priceRules) + len(defiRules)
+	log.Printf("✅ Loaded %d price rule(s) and %d DeFi rule(s) from %s", len(priceRules), len(defiRules), filePath)
+	if totalRules == 0 {
+		return fmt.Errorf("no alert rules found in %s", filePath)
+	}
+
 	return nil
 }

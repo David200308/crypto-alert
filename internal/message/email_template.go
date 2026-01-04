@@ -3,11 +3,82 @@ package message
 import (
 	"fmt"
 	"html/template"
+	"math"
 	"strings"
 	"time"
 
 	"crypto-alert/internal/core"
 )
+
+// formatLargeNumber formats a large number with human-readable suffixes
+// Examples: 4630749868.335276 -> "4.63 billion (4,630,749,868.34)"
+//
+//	1500000 -> "1.50 million (1,500,000)"
+func formatLargeNumber(value float64) (formatted string, approximate string) {
+	absValue := math.Abs(value)
+
+	var suffix string
+	var divisor float64
+
+	switch {
+	case absValue >= 1e12:
+		suffix = "trillion"
+		divisor = 1e12
+	case absValue >= 1e9:
+		suffix = "billion"
+		divisor = 1e9
+	case absValue >= 1e6:
+		suffix = "million"
+		divisor = 1e6
+	case absValue >= 1e3:
+		suffix = "thousand"
+		divisor = 1e3
+	default:
+		// For numbers less than 1000, just format normally
+		approximate = fmt.Sprintf("%.2f", value)
+		return approximate, ""
+	}
+
+	// Calculate the approximate value
+	approxValue := value / divisor
+
+	// Format with 2 decimal places
+	formatted = fmt.Sprintf("%.2f %s", approxValue, suffix)
+
+	// Format the full number with commas
+	approximate = formatNumberWithCommas(value)
+
+	return formatted, approximate
+}
+
+// formatNumberWithCommas formats a number with thousand separators
+func formatNumberWithCommas(value float64) string {
+	// Check if it's a whole number
+	if value == math.Trunc(value) {
+		return fmt.Sprintf("%.0f", value)
+	}
+
+	// Format with 2 decimal places and add commas
+	// Simple approach: format and add commas manually for whole number part
+	parts := strings.Split(fmt.Sprintf("%.2f", value), ".")
+	intPart := parts[0]
+
+	// Add commas every 3 digits from right to left
+	var result strings.Builder
+	for i, digit := range intPart {
+		if i > 0 && (len(intPart)-i)%3 == 0 {
+			result.WriteString(",")
+		}
+		result.WriteRune(digit)
+	}
+
+	if len(parts) > 1 {
+		result.WriteString(".")
+		result.WriteString(parts[1])
+	}
+
+	return result.String()
+}
 
 // EmailTemplateData holds data for email template rendering
 type EmailTemplateData struct {
@@ -226,6 +297,270 @@ func FormatAlertEmail(decision *core.AlertDecision) (subject, textBody, htmlBody
 	subject = FormatAlertSubject(symbol, price, threshold, direction)
 	textBody = FormatAlertMessage(symbol, price, threshold, direction, timestamp, confidence)
 	htmlBody = FormatAlertHTML(symbol, price, threshold, direction, timestamp, confidence)
+
+	return subject, textBody, htmlBody
+}
+
+// FormatDeFiAlertSubject formats the email subject for a DeFi alert
+func FormatDeFiAlertSubject(protocol, version, field, chainName string, value, threshold float64, direction string) string {
+	return fmt.Sprintf("🚨 DeFi Alert: %s %s %s on %s %s %g", protocol, version, field, chainName, direction, threshold)
+}
+
+// FormatDeFiAlertMessage formats the plain text message for a DeFi alert
+func FormatDeFiAlertMessage(protocol, version, field, chainName string, value, threshold float64, direction string, timestamp time.Time) string {
+	var directionText string
+	switch direction {
+	case ">=":
+		directionText = "greater than or equal to"
+	case ">":
+		directionText = "greater than"
+	case "=":
+		directionText = "equal to"
+	case "<=":
+		directionText = "less than or equal to"
+	case "<":
+		directionText = "less than"
+	default:
+		directionText = direction
+	}
+
+	// Format value for text message - use human-readable format for TVL, add % for APY/UTILIZATION
+	var valueText, thresholdText string
+	if field == "TVL" {
+		valueFormatted, valueApprox := formatLargeNumber(value)
+		thresholdFormatted, _ := formatLargeNumber(threshold)
+		if valueApprox != "" {
+			valueText = fmt.Sprintf("%s (%s)", valueFormatted, valueApprox)
+		} else {
+			valueText = valueFormatted
+		}
+		thresholdText = thresholdFormatted
+	} else if field == "APY" || field == "UTILIZATION" {
+		// Add % symbol for APY and UTILIZATION
+		valueText = fmt.Sprintf("%g%%", value)
+		thresholdText = fmt.Sprintf("%g%%", threshold)
+	} else {
+		valueText = fmt.Sprintf("%g", value)
+		thresholdText = fmt.Sprintf("%g", threshold)
+	}
+
+	return fmt.Sprintf(`DeFi Alert Triggered!
+
+Protocol: %s %s
+Chain: %s
+Field: %s
+Current Value: %s
+Threshold: %s
+Condition: %s is %s threshold
+Timestamp: %s
+
+This is an automated alert from your DeFi monitoring system.
+`, protocol, version, chainName, field, valueText, thresholdText, field, directionText, timestamp.Format(time.RFC3339))
+}
+
+// FormatDeFiAlertHTML formats the HTML email body for a DeFi alert
+func FormatDeFiAlertHTML(protocol, version, field, chainName string, value, threshold float64, direction string, timestamp time.Time) string {
+	var directionText string
+	var directionEmoji string
+	switch direction {
+	case ">=":
+		directionText = "greater than or equal to"
+		directionEmoji = "📈"
+	case ">":
+		directionText = "greater than"
+		directionEmoji = "📈"
+	case "=":
+		directionText = "equal to"
+		directionEmoji = "⚖️"
+	case "<=":
+		directionText = "less than or equal to"
+		directionEmoji = "📉"
+	case "<":
+		directionText = "less than"
+		directionEmoji = "📉"
+	default:
+		directionText = direction
+		directionEmoji = "⚠️"
+	}
+
+	// Determine if value is above or below threshold for styling
+	var valueColor string
+	if value >= threshold {
+		valueColor = "#10b981" // green
+	} else {
+		valueColor = "#ef4444" // red
+	}
+
+	htmlTemplate := `
+<!DOCTYPE html>
+<html>
+<head>
+	<meta charset="UTF-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1.0">
+	<title>DeFi Alert</title>
+</head>
+<body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px;">
+	<div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 30px; border-radius: 10px 10px 0 0; text-align: center;">
+		<h1 style="color: white; margin: 0; font-size: 28px;">🚨 DeFi Alert</h1>
+	</div>
+	
+	<div style="background: #f9fafb; padding: 30px; border-radius: 0 0 10px 10px; border: 1px solid #e5e7eb;">
+		<div style="background: white; padding: 25px; border-radius: 8px; margin-bottom: 20px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
+			<h2 style="margin-top: 0; color: #1f2937; font-size: 24px;">{{.Protocol}} {{.Version}} Alert Triggered</h2>
+			
+			<div style="display: flex; align-items: center; margin: 20px 0;">
+				<span style="font-size: 48px; margin-right: 15px;">{{.DirectionEmoji}}</span>
+				<div>
+					<div style="font-size: 14px; color: #6b7280; text-transform: uppercase; letter-spacing: 1px;">Current {{.Field}}</div>
+					<div style="font-size: 32px; font-weight: bold; color: {{.ValueColor}};">{{.Value}}</div>
+				</div>
+			</div>
+			
+			<div style="border-top: 1px solid #e5e7eb; padding-top: 20px; margin-top: 20px;">
+				<table style="width: 100%%; border-collapse: collapse;">
+					<tr>
+						<td style="padding: 10px 0; color: #6b7280; font-weight: 500;">Protocol:</td>
+						<td style="padding: 10px 0; text-align: right; font-weight: 600;">{{.Protocol}} {{.Version}}</td>
+					</tr>
+					<tr>
+						<td style="padding: 10px 0; color: #6b7280; font-weight: 500;">Chain:</td>
+						<td style="padding: 10px 0; text-align: right; font-weight: 600;">{{.ChainName}}</td>
+					</tr>
+					<tr>
+						<td style="padding: 10px 0; color: #6b7280; font-weight: 500;">Field:</td>
+						<td style="padding: 10px 0; text-align: right; font-weight: 600;">{{.Field}}</td>
+					</tr>
+					<tr>
+						<td style="padding: 10px 0; color: #6b7280; font-weight: 500;">Threshold:</td>
+						<td style="padding: 10px 0; text-align: right; font-weight: 600;">{{.Threshold}}</td>
+					</tr>
+					<tr>
+						<td style="padding: 10px 0; color: #6b7280; font-weight: 500;">Condition:</td>
+						<td style="padding: 10px 0; text-align: right; font-weight: 600;">{{.Field}} is {{.DirectionText}} threshold</td>
+					</tr>
+					<tr>
+						<td style="padding: 10px 0; color: #6b7280; font-weight: 500;">Timestamp:</td>
+						<td style="padding: 10px 0; text-align: right; font-weight: 600;">{{.Timestamp}}</td>
+					</tr>
+				</table>
+			</div>
+		</div>
+		
+		<div style="text-align: center; color: #6b7280; font-size: 12px; margin-top: 20px;">
+			<p style="margin: 0;">This is an automated alert from your DeFi monitoring system.</p>
+		</div>
+	</div>
+</body>
+</html>
+`
+
+	// Format value - use human-readable format for TVL, add % for APY/UTILIZATION
+	var valueStr, thresholdStr string
+
+	if field == "TVL" {
+		valueFormatted, valueApprox := formatLargeNumber(value)
+		thresholdFormatted, _ := formatLargeNumber(threshold)
+
+		if valueApprox != "" {
+			valueStr = fmt.Sprintf("%s (%s)", valueFormatted, valueApprox)
+		} else {
+			valueStr = valueFormatted
+		}
+		thresholdStr = thresholdFormatted
+	} else if field == "APY" || field == "UTILIZATION" {
+		// Add % symbol for APY and UTILIZATION
+		valueStr = fmt.Sprintf("%g%%", value)
+		thresholdStr = fmt.Sprintf("%g%%", threshold)
+	} else {
+		valueStr = fmt.Sprintf("%g", value)
+		thresholdStr = fmt.Sprintf("%g", threshold)
+	}
+
+	// Prepare template data
+	data := struct {
+		Protocol       string
+		Version        string
+		Field          string
+		ChainName      string
+		Value          string
+		Threshold      string
+		DirectionText  string
+		DirectionEmoji string
+		ValueColor     string
+		Timestamp      string
+	}{
+		Protocol:       protocol,
+		Version:        version,
+		Field:          field,
+		ChainName:      chainName,
+		Value:          valueStr,
+		Threshold:      thresholdStr,
+		DirectionText:  directionText,
+		DirectionEmoji: directionEmoji,
+		ValueColor:     valueColor,
+		Timestamp:      timestamp.Format(time.RFC3339),
+	}
+
+	// Parse and execute template
+	tmpl, err := template.New("defi-email").Parse(htmlTemplate)
+	if err != nil {
+		// Fallback to simple HTML if template parsing fails
+		return fmt.Sprintf(`
+		<html>
+		<body>
+			<h1>🚨 DeFi Alert</h1>
+			<h2>%s %s Alert Triggered</h2>
+			<p><strong>Chain:</strong> %s</p>
+			<p><strong>Field:</strong> %s</p>
+			<p><strong>Current Value:</strong> %s</p>
+			<p><strong>Threshold:</strong> %s</p>
+			<p><strong>Condition:</strong> %s is %s threshold</p>
+			<p><strong>Timestamp:</strong> %s</p>
+		</body>
+		</html>
+		`, protocol, version, chainName, field, valueStr, thresholdStr, field, directionText, timestamp.Format(time.RFC3339))
+	}
+
+	var buf strings.Builder
+	if err := tmpl.Execute(&buf, data); err != nil {
+		// Fallback to simple HTML if template execution fails
+		return fmt.Sprintf(`
+		<html>
+		<body>
+			<h1>🚨 DeFi Alert</h1>
+			<h2>%s %s Alert Triggered</h2>
+			<p><strong>Chain:</strong> %s</p>
+			<p><strong>Field:</strong> %s</p>
+			<p><strong>Current Value:</strong> %s</p>
+			<p><strong>Threshold:</strong> %s</p>
+			<p><strong>Condition:</strong> %s is %s threshold</p>
+			<p><strong>Timestamp:</strong> %s</p>
+		</body>
+		</html>
+		`, protocol, version, chainName, field, valueStr, thresholdStr, field, directionText, timestamp.Format(time.RFC3339))
+	}
+
+	return buf.String()
+}
+
+// FormatDeFiAlertEmail formats both subject and body for a DeFi alert decision
+func FormatDeFiAlertEmail(decision *core.DeFiAlertDecision) (subject, textBody, htmlBody string) {
+	if decision.Rule == nil {
+		return "", "", ""
+	}
+
+	protocol := decision.Rule.Protocol
+	version := decision.Rule.Version
+	field := decision.Rule.Field
+	chainName := decision.ChainName
+	value := decision.CurrentValue
+	threshold := decision.Rule.Threshold
+	direction := string(decision.Rule.Direction)
+	timestamp := time.Now()
+
+	subject = FormatDeFiAlertSubject(protocol, version, field, chainName, value, threshold, direction)
+	textBody = FormatDeFiAlertMessage(protocol, version, field, chainName, value, threshold, direction, timestamp)
+	htmlBody = FormatDeFiAlertHTML(protocol, version, field, chainName, value, threshold, direction, timestamp)
 
 	return subject, textBody, htmlBody
 }

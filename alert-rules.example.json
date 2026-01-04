@@ -141,5 +141,20 @@
       "unit": "HOUR"
     },
     "recipient_email": ""
+  },
+  {
+    "protocol": "aave",
+    "version": "v3",
+    "chain_id": "1",
+    "market_token_contract": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
+    "field": "TVL",
+    "direction": "<=",
+    "threshold": 3000000000,
+    "enabled": true,
+    "frequency": {
+      "number": 1,
+      "unit": "HOUR"
+    },
+    "recipient_email": ""
   }
 ]

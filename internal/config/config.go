@@ -70,16 +70,31 @@ type AlertRuleConfig struct {
 
 // DeFiAlertRuleConfig represents a DeFi protocol alert rule in JSON format
 type DeFiAlertRuleConfig struct {
-	Protocol            string           `json:"protocol"`              // e.g., "aave"
-	Version             string           `json:"version"`               // e.g., "v3"
-	ChainID             string           `json:"chain_id"`              // Chain ID: "1", "8453", "42161"
-	MarketTokenContract string           `json:"market_token_contract"` // Token contract address
-	Field               string           `json:"field"`                 // "TVL", "APY", "UTILIZATION"
-	Threshold           float64          `json:"threshold"`
-	Direction           string           `json:"direction"` // ">=", ">", "=", "<=", "<"
-	Enabled             bool             `json:"enabled"`
-	RecipientEmail      string           `json:"recipient_email"`     // Email address to send alerts to
-	Frequency           *FrequencyConfig `json:"frequency,omitempty"` // Optional frequency configuration
+	Protocol              string           `json:"protocol"`                // e.g., "aave", "morpho"
+	Category              string           `json:"category,omitempty"`       // "market" or "vault" (for Morpho)
+	Version               string           `json:"version"`                 // e.g., "v3", "v1"
+	ChainID               string           `json:"chain_id"`                // Chain ID: "1", "8453", "42161"
+	MarketTokenContract   string           `json:"market_token_contract,omitempty"` // Token contract address (Aave) or market_id (Morpho market)
+	Field                 string           `json:"field"`                   // "TVL", "APY", "UTILIZATION", "LIQUIDITY"
+	Threshold             float64          `json:"threshold"`
+	Direction             string           `json:"direction"` // ">=", ">", "=", "<=", "<"
+	Enabled               bool             `json:"enabled"`
+	RecipientEmail        string           `json:"recipient_email"`     // Email address to send alerts to
+	Frequency             *FrequencyConfig `json:"frequency,omitempty"` // Optional frequency configuration
+	// Display names (optional, for better logging/alert messages)
+	MarketTokenName       string           `json:"market_token_name,omitempty"` // For Aave: display name of the token (e.g., "USDC")
+	MarketTokenPair       string           `json:"market_token_pair,omitempty"` // For Morpho market: display pair (e.g., "USDC/WETH")
+	VaultName             string           `json:"vault_name,omitempty"`         // For Morpho vault: display name of the vault
+	// Morpho-specific fields
+	MarketID              string           `json:"market_id,omitempty"`              // For Morpho market
+	BorrowTokenContract   string           `json:"borrow_token_contract,omitempty"` // For Morpho market (loan token)
+	CollateralTokenContract string         `json:"collateral_token_contract,omitempty"` // For Morpho market
+	OracleAddress         string           `json:"oracle_address,omitempty"`         // For Morpho market: oracle contract address
+	IRMAddress            string           `json:"irm_address,omitempty"`             // For Morpho market: Interest Rate Model address
+	LLTV                  string           `json:"lltv,omitempty"`                    // For Morpho market: Loan-to-Liquidation Value (as string to preserve precision)
+	MarketContractAddress string           `json:"market_contract_address,omitempty"` // For Morpho market: Market contract address (optional, uses default if not provided)
+	VaultTokenAddress     string           `json:"vault_token_address,omitempty"` // For Morpho vault
+	DepositTokenContract  string           `json:"deposit_token_contract,omitempty"` // For Morpho vault
 }
 
 // LoadAlertRules loads alert rules from a JSON file (supports both price and DeFi rules)
@@ -246,14 +261,42 @@ func parseDeFiRule(rc DeFiAlertRuleConfig) (*core.DeFiAlertRule, error) {
 		return nil, fmt.Errorf("chain_id cannot be empty in DeFi alert rule")
 	}
 
-	// Validate market token contract
-	if rc.MarketTokenContract == "" {
-		return nil, fmt.Errorf("market_token_contract cannot be empty in DeFi alert rule")
+	// Validate protocol-specific fields
+	if rc.Protocol == "morpho" {
+		// Morpho requires category
+		if rc.Category != "market" && rc.Category != "vault" {
+			return nil, fmt.Errorf("category must be 'market' or 'vault' for Morpho protocol")
+		}
+		
+		if rc.Category == "market" {
+			// For Morpho market, validate market_id or market_token_contract
+			if rc.MarketID == "" && rc.MarketTokenContract == "" {
+				return nil, fmt.Errorf("market_id or market_token_contract is required for Morpho market")
+			}
+			// Use market_id if provided, otherwise use market_token_contract
+			if rc.MarketID != "" && rc.MarketTokenContract == "" {
+				rc.MarketTokenContract = rc.MarketID
+			}
+		} else if rc.Category == "vault" {
+			// For Morpho vault, validate vault_token_address
+			if rc.VaultTokenAddress == "" {
+				return nil, fmt.Errorf("vault_token_address is required for Morpho vault")
+			}
+			// Use vault_token_address as MarketTokenContract for consistency
+			if rc.MarketTokenContract == "" {
+				rc.MarketTokenContract = rc.VaultTokenAddress
+			}
+		}
+	} else {
+		// For other protocols (e.g., Aave), validate market token contract
+		if rc.MarketTokenContract == "" {
+			return nil, fmt.Errorf("market_token_contract cannot be empty in DeFi alert rule")
+		}
 	}
 
 	// Validate field
-	if rc.Field != "TVL" && rc.Field != "APY" && rc.Field != "UTILIZATION" {
-		return nil, fmt.Errorf("invalid field '%s' for protocol %s %s, must be one of: TVL, APY, UTILIZATION", rc.Field, rc.Protocol, rc.Version)
+	if rc.Field != "TVL" && rc.Field != "APY" && rc.Field != "UTILIZATION" && rc.Field != "LIQUIDITY" {
+		return nil, fmt.Errorf("invalid field '%s' for protocol %s %s, must be one of: TVL, APY, UTILIZATION, LIQUIDITY", rc.Field, rc.Protocol, rc.Version)
 	}
 
 	// Validate threshold
@@ -291,8 +334,9 @@ func parseDeFiRule(rc DeFiAlertRuleConfig) (*core.DeFiAlertRule, error) {
 		}
 	}
 
-	return &core.DeFiAlertRule{
+	rule := &core.DeFiAlertRule{
 		Protocol:            rc.Protocol,
+		Category:            rc.Category,
 		Version:             rc.Version,
 		ChainID:             rc.ChainID,
 		MarketTokenContract: rc.MarketTokenContract,
@@ -302,7 +346,25 @@ func parseDeFiRule(rc DeFiAlertRuleConfig) (*core.DeFiAlertRule, error) {
 		Enabled:             rc.Enabled,
 		RecipientEmail:      rc.RecipientEmail,
 		Frequency:           frequency,
-	}, nil
+		// Display names
+		MarketTokenName:     rc.MarketTokenName,
+		MarketTokenPair:     rc.MarketTokenPair,
+		VaultName:           rc.VaultName,
+	}
+	
+	// Set Morpho-specific fields
+	if rc.Protocol == "morpho" {
+		rule.BorrowTokenContract = rc.BorrowTokenContract
+		rule.CollateralTokenContract = rc.CollateralTokenContract
+		rule.OracleAddress = rc.OracleAddress
+		rule.IRMAddress = rc.IRMAddress
+		rule.LLTV = rc.LLTV
+		rule.MarketContractAddress = rc.MarketContractAddress
+		rule.VaultTokenAddress = rc.VaultTokenAddress
+		rule.DepositTokenContract = rc.DepositTokenContract
+	}
+	
+	return rule, nil
 }
 
 // getEnv gets an environment variable or returns a default value

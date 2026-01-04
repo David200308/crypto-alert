@@ -12,6 +12,7 @@ import (
 	"crypto-alert/internal/config"
 	"crypto-alert/internal/core"
 	"crypto-alert/internal/defi/aave"
+	"crypto-alert/internal/defi/morpho"
 	"crypto-alert/internal/message"
 	"crypto-alert/internal/price"
 
@@ -76,8 +77,26 @@ func main() {
 		log.Printf("📊 Monitoring DeFi protocols: %d rule(s)", len(defiRules))
 		for _, rule := range defiRules {
 			if rule.Enabled {
-				chainName, _ := aave.GetChainNameFromID(rule.ChainID)
-				log.Printf("  - %s %s on %s (%s): %s", rule.Protocol, rule.Version, chainName, rule.ChainID, rule.Field)
+				var chainName string
+				if rule.Protocol == "aave" {
+					chainName, _ = aave.GetChainNameFromID(rule.ChainID)
+				} else if rule.Protocol == "morpho" {
+					chainName, _ = morpho.GetChainNameFromID(rule.ChainID)
+				}
+				categoryStr := ""
+				if rule.Category != "" {
+					categoryStr = " " + rule.Category
+				}
+				// Use display names if available
+				displayName := ""
+				if rule.Protocol == "aave" && rule.MarketTokenName != "" {
+					displayName = " (" + rule.MarketTokenName + ")"
+				} else if rule.Protocol == "morpho" && rule.Category == "market" && rule.MarketTokenPair != "" {
+					displayName = " (" + rule.MarketTokenPair + ")"
+				} else if rule.Protocol == "morpho" && rule.Category == "vault" && rule.VaultName != "" {
+					displayName = " (" + rule.VaultName + ")"
+				}
+				log.Printf("  - %s%s %s on %s (%s)%s: %s", rule.Protocol, categoryStr, rule.Version, chainName, rule.ChainID, displayName, rule.Field)
 			}
 		}
 	}
@@ -218,13 +237,30 @@ func checkAndAlertDeFi(
 		return nil
 	}
 
-	// Group rules by chain ID and protocol
-	chainClients := make(map[string]*aave.AaveV3Client)
+	// Group clients by protocol, category, and chain ID
+	// Key format: "protocol:category:chainID" or "protocol:chainID" for protocols without categories
+	type clientKey struct {
+		protocol string
+		category string
+		chainID  string
+	}
+	clients := make(map[clientKey]interface{})
 	defer func() {
 		// Close all clients
-		for _, client := range chainClients {
-			if client != nil {
-				client.Close()
+		for _, client := range clients {
+			switch c := client.(type) {
+			case *aave.AaveV3Client:
+				if c != nil {
+					c.Close()
+				}
+			case *morpho.MorphoV1MarketClient:
+				if c != nil {
+					c.Close()
+				}
+			case *morpho.MorphoV1VaultClient:
+				if c != nil {
+					c.Close()
+				}
 			}
 		}
 	}()
@@ -236,48 +272,147 @@ func checkAndAlertDeFi(
 			continue
 		}
 
-		// Only support Aave v3 for now
-		if rule.Protocol != "aave" || rule.Version != "v3" {
-			log.Printf("⚠️  Unsupported protocol: %s %s (only aave v3 is supported)", rule.Protocol, rule.Version)
-			continue
-		}
+		var chainName string
+		var value float64
+		var err error
 
-		// Get or create client for this chain
-		client, ok := chainClients[rule.ChainID]
-		if !ok {
-			var err error
-			client, err = aave.NewAaveV3Client(rule.ChainID)
+		// Handle Aave v3
+		if rule.Protocol == "aave" && rule.Version == "v3" {
+			key := clientKey{protocol: "aave", chainID: rule.ChainID}
+			client, ok := clients[key].(*aave.AaveV3Client)
+			if !ok {
+				client, err = aave.NewAaveV3Client(rule.ChainID)
+				if err != nil {
+					log.Printf("⚠️  Failed to create Aave client for chain %s: %v", rule.ChainID, err)
+					continue
+				}
+				clients[key] = client
+			}
+
+			chainName, err = aave.GetChainNameFromID(rule.ChainID)
 			if err != nil {
-				log.Printf("⚠️  Failed to create Aave client for chain %s: %v", rule.ChainID, err)
+				log.Printf("⚠️  Failed to get chain name for chain %s: %v", rule.ChainID, err)
 				continue
 			}
-			chainClients[rule.ChainID] = client
-		}
 
-		// Get chain name
-		chainName, err := aave.GetChainNameFromID(rule.ChainID)
-		if err != nil {
-			log.Printf("⚠️  Failed to get chain name for chain %s: %v", rule.ChainID, err)
+			tokenAddress := common.HexToAddress(rule.MarketTokenContract)
+			fieldType := aave.FieldType(rule.Field)
+			value, err = client.GetFieldValue(ctx, tokenAddress, fieldType)
+			if err != nil {
+				log.Printf("⚠️  Failed to fetch %s for token %s on %s: %v", rule.Field, rule.MarketTokenContract, chainName, err)
+				continue
+			}
+
+		} else if rule.Protocol == "morpho" && rule.Version == "v1" {
+			// Handle Morpho v1
+			if rule.Category == "market" {
+				key := clientKey{protocol: "morpho", category: "market", chainID: rule.ChainID}
+				client, ok := clients[key].(*morpho.MorphoV1MarketClient)
+				if !ok {
+					// Create market client
+					loanToken := rule.BorrowTokenContract
+					collateralToken := rule.CollateralTokenContract
+					if loanToken == "" || collateralToken == "" {
+						log.Printf("⚠️  Missing required fields for Morpho market: borrow_token_contract and collateral_token_contract are required")
+						continue
+					}
+					// Debug: log the values being passed
+					client, err = morpho.NewMorphoV1MarketClient(rule.ChainID, rule.MarketTokenContract, loanToken, collateralToken, rule.OracleAddress, rule.IRMAddress, rule.LLTV, rule.MarketContractAddress)
+					if err != nil {
+						log.Printf("⚠️  Failed to create Morpho market client for chain %s: %v", rule.ChainID, err)
+						continue
+					}
+					clients[key] = client
+				}
+
+				chainName, err = morpho.GetChainNameFromID(rule.ChainID)
+				if err != nil {
+					log.Printf("⚠️  Failed to get chain name for chain %s: %v", rule.ChainID, err)
+					continue
+				}
+
+				fieldType := morpho.MarketFieldType(rule.Field)
+				value, err = client.GetFieldValue(ctx, fieldType)
+				if err != nil {
+					marketDisplay := rule.MarketTokenContract
+					if rule.MarketTokenPair != "" {
+						marketDisplay = rule.MarketTokenPair
+					}
+					log.Printf("⚠️  Failed to fetch %s for Morpho market %s on %s: %v", rule.Field, marketDisplay, chainName, err)
+					continue
+				}
+
+			} else if rule.Category == "vault" {
+				key := clientKey{protocol: "morpho", category: "vault", chainID: rule.ChainID}
+				client, ok := clients[key].(*morpho.MorphoV1VaultClient)
+				if !ok {
+					// Create vault client
+					vaultToken := rule.VaultTokenAddress
+					if vaultToken == "" {
+						vaultToken = rule.MarketTokenContract
+					}
+					depositToken := rule.DepositTokenContract
+					if vaultToken == "" || depositToken == "" {
+						log.Printf("⚠️  Missing required fields for Morpho vault: vault_token_address and deposit_token_contract are required")
+						continue
+					}
+					client, err = morpho.NewMorphoV1VaultClient(rule.ChainID, vaultToken, depositToken)
+					if err != nil {
+						log.Printf("⚠️  Failed to create Morpho vault client for chain %s: %v", rule.ChainID, err)
+						continue
+					}
+					clients[key] = client
+				}
+
+				chainName, err = morpho.GetChainNameFromID(rule.ChainID)
+				if err != nil {
+					log.Printf("⚠️  Failed to get chain name for chain %s: %v", rule.ChainID, err)
+					continue
+				}
+
+				fieldType := morpho.VaultFieldType(rule.Field)
+				value, err = client.GetFieldValue(ctx, fieldType)
+				if err != nil {
+					vaultDisplay := rule.VaultTokenAddress
+					if rule.VaultName != "" {
+						vaultDisplay = rule.VaultName
+					}
+					log.Printf("⚠️  Failed to fetch %s for Morpho vault %s on %s: %v", rule.Field, vaultDisplay, chainName, err)
+					continue
+				}
+
+			} else {
+				log.Printf("⚠️  Invalid category '%s' for Morpho protocol (must be 'market' or 'vault')", rule.Category)
+				continue
+			}
+
+		} else {
+			log.Printf("⚠️  Unsupported protocol: %s %s (supported: aave v3, morpho v1)", rule.Protocol, rule.Version)
 			continue
 		}
 
-		// Parse token address
-		tokenAddress := common.HexToAddress(rule.MarketTokenContract)
-
-		// Parse field type
-		fieldType := aave.FieldType(rule.Field)
-
-		// Fetch field value
-		value, err := client.GetFieldValue(ctx, tokenAddress, fieldType)
-		if err != nil {
-			log.Printf("⚠️  Failed to fetch %s for token %s on %s: %v", rule.Field, rule.MarketTokenContract, chainName, err)
-			continue
+		categoryStr := ""
+		if rule.Category != "" {
+			categoryStr = " " + rule.Category
 		}
-
-		log.Printf("💰 %s %s on %s - %s: %g", rule.Protocol, rule.Version, chainName, rule.Field, value)
+		// Use display names if available
+		displayName := ""
+		if rule.Protocol == "aave" && rule.MarketTokenName != "" {
+			displayName = " (" + rule.MarketTokenName + ")"
+		} else if rule.Protocol == "morpho" && rule.Category == "market" && rule.MarketTokenPair != "" {
+			displayName = " (" + rule.MarketTokenPair + ")"
+		} else if rule.Protocol == "morpho" && rule.Category == "vault" && rule.VaultName != "" {
+			displayName = " (" + rule.VaultName + ")"
+		}
+		log.Printf("💰 %s%s %s on %s - %s%s: %g", rule.Protocol, categoryStr, rule.Version, chainName, rule.Field, displayName, value)
 
 		// Evaluate alert rules
-		decisions := decisionEngine.EvaluateDeFi(rule.ChainID, rule.MarketTokenContract, rule.Field, value, chainName)
+		// Use MarketTokenContract as the identifier (or VaultTokenAddress for vaults)
+		identifier := rule.MarketTokenContract
+		if rule.Protocol == "morpho" && rule.Category == "vault" && rule.VaultTokenAddress != "" {
+			identifier = rule.VaultTokenAddress
+		}
+		decisions := decisionEngine.EvaluateDeFi(rule.ChainID, identifier, rule.Field, value, chainName)
 
 		// Send alerts for triggered rules
 		for _, decision := range decisions {

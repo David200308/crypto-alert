@@ -49,16 +49,30 @@ type AlertRule struct {
 // DeFiAlertRule defines a DeFi protocol alert rule
 type DeFiAlertRule struct {
 	Protocol            string
+	Category            string // "market" or "vault" (for Morpho), empty for others
 	Version             string
 	ChainID             string
-	MarketTokenContract string
-	Field               string // "TVL", "APY", "UTILIZATION"
+	MarketTokenContract string // For Aave: token contract, For Morpho market: market_id, For Morpho vault: vault_token_address
+	Field               string // "TVL", "APY", "UTILIZATION", "LIQUIDITY"
 	Threshold           float64
 	Direction           Direction // >=, >, =, <=, <
 	Enabled             bool
 	RecipientEmail      string
 	LastTriggered       *time.Time
 	Frequency           *Frequency
+	// Display names (optional, for better logging/alert messages)
+	MarketTokenName     string // For Aave: display name of the token (e.g., "USDC")
+	MarketTokenPair     string // For Morpho market: display pair (e.g., "USDC/WETH")
+	VaultName           string // For Morpho vault: display name of the vault
+	// Morpho-specific fields
+	BorrowTokenContract   string // For Morpho market (loan token)
+	CollateralTokenContract string // For Morpho market
+	OracleAddress         string // For Morpho market: oracle contract address
+	IRMAddress            string // For Morpho market: Interest Rate Model address
+	LLTV                  string // For Morpho market: Loan-to-Liquidation Value
+	MarketContractAddress string // For Morpho market: Market contract address (optional)
+	VaultTokenAddress     string // For Morpho vault (same as MarketTokenContract)
+	DepositTokenContract  string // For Morpho vault
 }
 
 // AlertDecision represents the result of evaluating an alert rule

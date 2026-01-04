@@ -89,6 +89,7 @@ const (
 	FieldTVL         FieldType = "TVL"
 	FieldAPY         FieldType = "APY"
 	FieldUtilization FieldType = "UTILIZATION"
+	FieldLiquidity   FieldType = "LIQUIDITY"
 )
 
 // ReserveData holds reserve data from Aave
@@ -97,6 +98,7 @@ type ReserveData struct {
 	TotalStableDebt   *big.Int
 	TotalVariableDebt *big.Int
 	LiquidityRate     *big.Int // Used for APY calculation
+	Liquidity         *big.Int // Available liquidity (totalSupply - totalDebt)
 	Utilization       float64  // Calculated: (totalDebt / totalSupply) * 100
 	APY               float64  // Calculated from liquidityRate
 }
@@ -304,6 +306,12 @@ func (c *AaveV3Client) getReserveDataFromPool(ctx context.Context, tokenAddress 
 	// Calculate total debt
 	totalDebt := new(big.Int).Add(totalStableDebt, totalVariableDebt)
 
+	// Calculate liquidity: available supply (totalSupply - totalDebt)
+	liquidity := new(big.Int).Sub(totalAToken, totalDebt)
+	if liquidity.Sign() < 0 {
+		liquidity = big.NewInt(0)
+	}
+
 	// Calculate utilization: (totalDebt / totalSupply) * 100
 	var utilization float64
 	if totalAToken.Sign() > 0 {
@@ -324,6 +332,7 @@ func (c *AaveV3Client) getReserveDataFromPool(ctx context.Context, tokenAddress 
 		TotalStableDebt:   totalStableDebt,
 		TotalVariableDebt: totalVariableDebt,
 		LiquidityRate:     currentLiquidityRate,
+		Liquidity:         liquidity,
 		Utilization:       utilization,
 		APY:               apy,
 	}, nil
@@ -366,7 +375,7 @@ func (c *AaveV3Client) getTokenTotalSupply(ctx context.Context, tokenAddr common
 	return totalSupply, nil
 }
 
-// GetFieldValue retrieves the value for a specific field (TVL, APY, or UTILIZATION)
+// GetFieldValue retrieves the value for a specific field (TVL, APY, UTILIZATION, or LIQUIDITY)
 func (c *AaveV3Client) GetFieldValue(ctx context.Context, tokenAddress common.Address, field FieldType) (float64, error) {
 	reserveData, err := c.GetReserveData(ctx, tokenAddress)
 	if err != nil {
@@ -384,6 +393,11 @@ func (c *AaveV3Client) GetFieldValue(ctx context.Context, tokenAddress common.Ad
 		return reserveData.APY, nil
 	case FieldUtilization:
 		return reserveData.Utilization, nil
+	case FieldLiquidity:
+		// Liquidity is available supply (totalSupply - totalDebt), convert to float64
+		// Note: For USDC (6 decimals), this would be in units of 1e6
+		value, _ := new(big.Float).SetInt(reserveData.Liquidity).Float64()
+		return value / 1000000.0, nil
 	default:
 		return 0, fmt.Errorf("unsupported field type: %s", field)
 	}

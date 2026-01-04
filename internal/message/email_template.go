@@ -302,12 +302,15 @@ func FormatAlertEmail(decision *core.AlertDecision) (subject, textBody, htmlBody
 }
 
 // FormatDeFiAlertSubject formats the email subject for a DeFi alert
-func FormatDeFiAlertSubject(protocol, version, field, chainName string, value, threshold float64, direction string) string {
+func FormatDeFiAlertSubject(protocol, version, field, chainName string, value, threshold float64, direction string, marketInfo string) string {
+	if marketInfo != "" {
+		return fmt.Sprintf("🚨 DeFi Alert: %s %s %s %s on %s %s %g", protocol, version, marketInfo, field, chainName, direction, threshold)
+	}
 	return fmt.Sprintf("🚨 DeFi Alert: %s %s %s on %s %s %g", protocol, version, field, chainName, direction, threshold)
 }
 
 // FormatDeFiAlertMessage formats the plain text message for a DeFi alert
-func FormatDeFiAlertMessage(protocol, version, field, chainName string, value, threshold float64, direction string, timestamp time.Time) string {
+func FormatDeFiAlertMessage(protocol, version, field, chainName string, value, threshold float64, direction string, timestamp time.Time, marketInfo string) string {
 	var directionText string
 	switch direction {
 	case ">=":
@@ -344,9 +347,15 @@ func FormatDeFiAlertMessage(protocol, version, field, chainName string, value, t
 		thresholdText = fmt.Sprintf("%g", threshold)
 	}
 
-	return fmt.Sprintf(`DeFi Alert Triggered!
+	message := fmt.Sprintf(`DeFi Alert Triggered!
 
-Protocol: %s %s
+Protocol: %s %s`, protocol, version)
+	
+	if marketInfo != "" {
+		message += fmt.Sprintf("\nMarket: %s", marketInfo)
+	}
+	
+	message += fmt.Sprintf(`
 Chain: %s
 Field: %s
 Current Value: %s
@@ -355,11 +364,13 @@ Condition: %s is %s threshold
 Timestamp: %s
 
 This is an automated alert from your DeFi monitoring system.
-`, protocol, version, chainName, field, valueText, thresholdText, field, directionText, timestamp.Format(time.RFC3339))
+`, chainName, field, valueText, thresholdText, field, directionText, timestamp.Format(time.RFC3339))
+	
+	return message
 }
 
 // FormatDeFiAlertHTML formats the HTML email body for a DeFi alert
-func FormatDeFiAlertHTML(protocol, version, field, chainName string, value, threshold float64, direction string, timestamp time.Time) string {
+func FormatDeFiAlertHTML(protocol, version, field, chainName string, value, threshold float64, direction string, timestamp time.Time, marketInfo string) string {
 	var directionText string
 	var directionEmoji string
 	switch direction {
@@ -422,6 +433,12 @@ func FormatDeFiAlertHTML(protocol, version, field, chainName string, value, thre
 						<td style="padding: 10px 0; color: #6b7280; font-weight: 500;">Protocol:</td>
 						<td style="padding: 10px 0; text-align: right; font-weight: 600;">{{.Protocol}} {{.Version}}</td>
 					</tr>
+					{{if .MarketInfo}}
+					<tr>
+						<td style="padding: 10px 0; color: #6b7280; font-weight: 500;">{{.MarketInfoLabel}}:</td>
+						<td style="padding: 10px 0; text-align: right; font-weight: 600;">{{.MarketInfo}}</td>
+					</tr>
+					{{end}}
 					<tr>
 						<td style="padding: 10px 0; color: #6b7280; font-weight: 500;">Chain:</td>
 						<td style="padding: 10px 0; text-align: right; font-weight: 600;">{{.ChainName}}</td>
@@ -476,6 +493,23 @@ func FormatDeFiAlertHTML(protocol, version, field, chainName string, value, thre
 		thresholdStr = fmt.Sprintf("%g", threshold)
 	}
 
+	// Determine market info label based on protocol
+	var marketInfoLabel string
+	if protocol == "aave" {
+		marketInfoLabel = "Token"
+	} else if protocol == "morpho" {
+		// Extract category from marketInfo - it will be "market (...)" or "vault (...)"
+		if strings.HasPrefix(strings.ToLower(marketInfo), "market") {
+			marketInfoLabel = "Market"
+		} else if strings.HasPrefix(strings.ToLower(marketInfo), "vault") {
+			marketInfoLabel = "Vault"
+		} else {
+			marketInfoLabel = "Market"
+		}
+	} else {
+		marketInfoLabel = "Market"
+	}
+
 	// Prepare template data
 	data := struct {
 		Protocol       string
@@ -488,6 +522,8 @@ func FormatDeFiAlertHTML(protocol, version, field, chainName string, value, thre
 		DirectionEmoji string
 		ValueColor     string
 		Timestamp      string
+		MarketInfo     string
+		MarketInfoLabel string
 	}{
 		Protocol:       protocol,
 		Version:        version,
@@ -499,17 +535,23 @@ func FormatDeFiAlertHTML(protocol, version, field, chainName string, value, thre
 		DirectionEmoji: directionEmoji,
 		ValueColor:     valueColor,
 		Timestamp:      timestamp.Format(time.RFC3339),
+		MarketInfo:     marketInfo,
+		MarketInfoLabel: marketInfoLabel,
 	}
 
 	// Parse and execute template
 	tmpl, err := template.New("defi-email").Parse(htmlTemplate)
 	if err != nil {
 		// Fallback to simple HTML if template parsing fails
-		return fmt.Sprintf(`
+		fallbackHTML := fmt.Sprintf(`
 		<html>
 		<body>
 			<h1>🚨 DeFi Alert</h1>
-			<h2>%s %s Alert Triggered</h2>
+			<h2>%s %s Alert Triggered</h2>`, protocol, version)
+		if marketInfo != "" {
+			fallbackHTML += fmt.Sprintf("\n\t\t<p><strong>%s:</strong> %s</p>", marketInfoLabel, marketInfo)
+		}
+		fallbackHTML += fmt.Sprintf(`
 			<p><strong>Chain:</strong> %s</p>
 			<p><strong>Field:</strong> %s</p>
 			<p><strong>Current Value:</strong> %s</p>
@@ -518,17 +560,22 @@ func FormatDeFiAlertHTML(protocol, version, field, chainName string, value, thre
 			<p><strong>Timestamp:</strong> %s</p>
 		</body>
 		</html>
-		`, protocol, version, chainName, field, valueStr, thresholdStr, field, directionText, timestamp.Format(time.RFC3339))
+		`, chainName, field, valueStr, thresholdStr, field, directionText, timestamp.Format(time.RFC3339))
+		return fallbackHTML
 	}
 
 	var buf strings.Builder
 	if err := tmpl.Execute(&buf, data); err != nil {
 		// Fallback to simple HTML if template execution fails
-		return fmt.Sprintf(`
+		fallbackHTML := fmt.Sprintf(`
 		<html>
 		<body>
 			<h1>🚨 DeFi Alert</h1>
-			<h2>%s %s Alert Triggered</h2>
+			<h2>%s %s Alert Triggered</h2>`, protocol, version)
+		if marketInfo != "" {
+			fallbackHTML += fmt.Sprintf("\n\t\t<p><strong>%s:</strong> %s</p>", marketInfoLabel, marketInfo)
+		}
+		fallbackHTML += fmt.Sprintf(`
 			<p><strong>Chain:</strong> %s</p>
 			<p><strong>Field:</strong> %s</p>
 			<p><strong>Current Value:</strong> %s</p>
@@ -537,7 +584,8 @@ func FormatDeFiAlertHTML(protocol, version, field, chainName string, value, thre
 			<p><strong>Timestamp:</strong> %s</p>
 		</body>
 		</html>
-		`, protocol, version, chainName, field, valueStr, thresholdStr, field, directionText, timestamp.Format(time.RFC3339))
+		`, chainName, field, valueStr, thresholdStr, field, directionText, timestamp.Format(time.RFC3339))
+		return fallbackHTML
 	}
 
 	return buf.String()
@@ -558,9 +606,33 @@ func FormatDeFiAlertEmail(decision *core.DeFiAlertDecision) (subject, textBody, 
 	direction := string(decision.Rule.Direction)
 	timestamp := time.Now()
 
-	subject = FormatDeFiAlertSubject(protocol, version, field, chainName, value, threshold, direction)
-	textBody = FormatDeFiAlertMessage(protocol, version, field, chainName, value, threshold, direction, timestamp)
-	htmlBody = FormatDeFiAlertHTML(protocol, version, field, chainName, value, threshold, direction, timestamp)
+	// Build market info string based on protocol
+	var marketInfo string
+	if protocol == "aave" {
+		// For Aave, show token name
+		if decision.Rule.MarketTokenName != "" {
+			marketInfo = decision.Rule.MarketTokenName
+		}
+	} else if protocol == "morpho" {
+		// For Morpho, show category and either market pair or vault name
+		if decision.Rule.Category == "market" {
+			if decision.Rule.MarketTokenPair != "" {
+				marketInfo = fmt.Sprintf("%s (%s)", decision.Rule.Category, decision.Rule.MarketTokenPair)
+			} else {
+				marketInfo = decision.Rule.Category
+			}
+		} else if decision.Rule.Category == "vault" {
+			if decision.Rule.VaultName != "" {
+				marketInfo = fmt.Sprintf("%s (%s)", decision.Rule.Category, decision.Rule.VaultName)
+			} else {
+				marketInfo = decision.Rule.Category
+			}
+		}
+	}
+
+	subject = FormatDeFiAlertSubject(protocol, version, field, chainName, value, threshold, direction, marketInfo)
+	textBody = FormatDeFiAlertMessage(protocol, version, field, chainName, value, threshold, direction, timestamp, marketInfo)
+	htmlBody = FormatDeFiAlertHTML(protocol, version, field, chainName, value, threshold, direction, timestamp, marketInfo)
 
 	return subject, textBody, htmlBody
 }

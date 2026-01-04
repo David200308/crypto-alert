@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"math/big"
 	"os"
+	"reflect"
 	"strings"
 
 	"github.com/ethereum/go-ethereum"
@@ -26,8 +27,11 @@ func ensureEnvLoaded() {
 	}
 }
 
-//go:embed abi/aave_pool_data_provider.json
-var poolDataProviderABIJSON string
+//go:embed abi/pool.json
+var poolABIJSON string
+
+//go:embed abi/erc20.json
+var erc20ABIJSON string
 
 // ChainInfo holds chain information
 type ChainInfo struct {
@@ -70,12 +74,12 @@ func getRPCURLForChain(chainID string) string {
 	}
 }
 
-// PoolDataProvider addresses for each chain
+// Pool contract addresses for each chain (proxy contracts)
 // Source: https://docs.aave.com/developers/deployed-contracts/v3-mainnet
-var poolDataProviderAddresses = map[string]common.Address{
-	"1":     common.HexToAddress("0x7B4EB56E7CD4b454BA8ff71E4518426369a138a3"), // Ethereum Mainnet
-	"8453":  common.HexToAddress("0x2d8A3C567718a3cDbC0c0A2f5C86ffA1308c4dA6"), // Base
-	"42161": common.HexToAddress("0x69FA688f1Dc47d4B5d8029D5a35FB7a548310654"), // Arbitrum One
+var poolAddresses = map[string]common.Address{
+	"1":     common.HexToAddress("0x87870Bca3F3fD6335C3F4ce8392D69350B4fA4E2"), // Ethereum Mainnet Pool proxy
+	"8453":  common.HexToAddress("0xA238Dd80C259a72e81d7e4664a9801593F98d1c5"), // Base Pool proxy
+	"42161": common.HexToAddress("0x794a61358D6845594F94dc1DB02A252b5b4814aD"), // Arbitrum One Pool proxy
 }
 
 // FieldType represents the type of field to monitor
@@ -104,6 +108,7 @@ type AaveV3Client struct {
 	client    *ethclient.Client
 	contract  *bind.BoundContract
 	abi       abi.ABI
+	usePool   bool // true if using Pool contract directly, false if using PoolDataProvider
 }
 
 // NewAaveV3Client creates a new Aave v3 client for the specified chain
@@ -128,19 +133,18 @@ func NewAaveV3Client(chainID string) (*AaveV3Client, error) {
 		return nil, fmt.Errorf("failed to connect to %s RPC: %w", chainInfo.ChainName, err)
 	}
 
-	// Parse ABI (embedded in binary)
-	parsedABI, err := abi.JSON(strings.NewReader(poolDataProviderABIJSON))
+	// Use Pool contract directly for all chains
+	parsedABI, err := abi.JSON(strings.NewReader(poolABIJSON))
 	if err != nil {
-		return nil, fmt.Errorf("failed to parse ABI: %w", err)
+		return nil, fmt.Errorf("failed to parse Pool ABI: %w", err)
 	}
 
-	// Get pool data provider address for this chain
-	poolDataProviderAddr, ok := poolDataProviderAddresses[chainID]
+	contractAddr, ok := poolAddresses[chainID]
 	if !ok {
-		return nil, fmt.Errorf("pool data provider address not found for chain %s", chainID)
+		return nil, fmt.Errorf("pool address not found for chain %s", chainID)
 	}
 
-	contract := bind.NewBoundContract(poolDataProviderAddr, parsedABI, client, client, client)
+	contract := bind.NewBoundContract(contractAddr, parsedABI, client, client, client)
 
 	return &AaveV3Client{
 		chainID:   chainID,
@@ -148,6 +152,7 @@ func NewAaveV3Client(chainID string) (*AaveV3Client, error) {
 		client:    client,
 		contract:  contract,
 		abi:       parsedABI,
+		usePool:   true, // Always use Pool contract now
 	}, nil
 }
 
@@ -170,10 +175,16 @@ func (c *AaveV3Client) Close() {
 
 // GetReserveData fetches reserve data for a specific token address
 func (c *AaveV3Client) GetReserveData(ctx context.Context, tokenAddress common.Address) (*ReserveData, error) {
+	// Always use Pool contract for all chains
+	return c.getReserveDataFromPool(ctx, tokenAddress)
+}
+
+// getReserveDataFromPool fetches reserve data using Pool contract (Ethereum Mainnet)
+func (c *AaveV3Client) getReserveDataFromPool(ctx context.Context, tokenAddress common.Address) (*ReserveData, error) {
 	// Get the method from ABI
 	method, exists := c.abi.Methods["getReserveData"]
 	if !exists {
-		return nil, fmt.Errorf("getReserveData method not found in ABI")
+		return nil, fmt.Errorf("getReserveData method not found in Pool ABI")
 	}
 
 	// Pack the input parameters
@@ -182,12 +193,15 @@ func (c *AaveV3Client) GetReserveData(ctx context.Context, tokenAddress common.A
 		return nil, fmt.Errorf("failed to pack input: %w", err)
 	}
 
-	// Prepend the method selector (first 4 bytes of keccak256 hash of function signature)
+	// Prepend the method selector
 	methodID := method.ID
 	input := append(methodID, packedParams...)
 
-	// Get the contract address
-	contractAddr := poolDataProviderAddresses[c.chainID]
+	// Get the Pool contract address for this chain
+	contractAddr, ok := poolAddresses[c.chainID]
+	if !ok {
+		return nil, fmt.Errorf("pool address not found for chain %s", c.chainID)
+	}
 
 	// Call the contract using ethclient.CallContract
 	msg := ethereum.CallMsg{
@@ -197,44 +211,94 @@ func (c *AaveV3Client) GetReserveData(ctx context.Context, tokenAddress common.A
 
 	result, err := c.client.CallContract(ctx, msg, nil)
 	if err != nil {
-		return nil, fmt.Errorf("failed to call contract: %w", err)
+		return nil, fmt.Errorf("failed to call Pool contract: %w", err)
 	}
 
-	// Unpack the output - UnpackValues returns the unpacked values
+	// Unpack the output - getReserveData returns a struct (tuple)
+	// UnpackValues returns the struct as a single element
 	unpacked, err := method.Outputs.UnpackValues(result)
 	if err != nil {
-		return nil, fmt.Errorf("failed to unpack output: %w", err)
+		return nil, fmt.Errorf("failed to unpack Pool contract output: %w", err)
 	}
 
-	// Extract values from unpacked results
-	// The ABI returns: unbacked, accruedToTreasuryScaled, totalAToken, totalStableDebt,
-	// totalVariableDebt, liquidityRate, variableBorrowRate, stableBorrowRate,
-	// averageStableBorrowRate, liquidityIndex, variableBorrowIndex, lastUpdateTimestamp
-	if len(unpacked) < 12 {
-		return nil, fmt.Errorf("unexpected number of return values: got %d, expected 12", len(unpacked))
+	if len(unpacked) != 1 {
+		return nil, fmt.Errorf("unexpected number of return values: got %d, expected 1 (struct)", len(unpacked))
 	}
 
-	var totalAToken, totalStableDebt, totalVariableDebt, liquidityRate *big.Int
-	var ok bool
-
-	// Extract totalAToken (index 2)
-	if totalAToken, ok = unpacked[2].(*big.Int); !ok {
-		return nil, fmt.Errorf("failed to extract totalAToken")
+	// Use reflection to access struct fields dynamically
+	structValue := reflect.ValueOf(unpacked[0])
+	if structValue.Kind() != reflect.Struct {
+		return nil, fmt.Errorf("expected struct type, got %T", unpacked[0])
 	}
 
-	// Extract totalStableDebt (index 3)
-	if totalStableDebt, ok = unpacked[3].(*big.Int); !ok {
-		return nil, fmt.Errorf("failed to extract totalStableDebt")
+	// Extract fields using reflection
+	var aTokenAddr, stableDebtTokenAddr, variableDebtTokenAddr common.Address
+	var currentLiquidityRate *big.Int
+
+	// Field names as they appear in the struct (case-sensitive)
+	fieldNames := []string{"ATokenAddress", "StableDebtTokenAddress", "VariableDebtTokenAddress", "CurrentLiquidityRate"}
+	fieldValues := make([]interface{}, len(fieldNames))
+
+	for i, fieldName := range fieldNames {
+		field := structValue.FieldByName(fieldName)
+		if !field.IsValid() {
+			// Try lowercase version
+			field = structValue.FieldByName(strings.ToLower(fieldName[:1]) + fieldName[1:])
+		}
+		if !field.IsValid() {
+			return nil, fmt.Errorf("field %s not found in struct (type: %T)", fieldName, unpacked[0])
+		}
+		fieldValues[i] = field.Interface()
 	}
 
-	// Extract totalVariableDebt (index 4)
-	if totalVariableDebt, ok = unpacked[4].(*big.Int); !ok {
-		return nil, fmt.Errorf("failed to extract totalVariableDebt")
+	// Extract addresses
+	if addr, ok := fieldValues[0].(common.Address); ok {
+		aTokenAddr = addr
+	} else {
+		return nil, fmt.Errorf("failed to extract aTokenAddress, got type %T", fieldValues[0])
 	}
 
-	// Extract liquidityRate (index 5)
-	if liquidityRate, ok = unpacked[5].(*big.Int); !ok {
-		return nil, fmt.Errorf("failed to extract liquidityRate")
+	if addr, ok := fieldValues[1].(common.Address); ok {
+		stableDebtTokenAddr = addr
+	} else {
+		return nil, fmt.Errorf("failed to extract stableDebtTokenAddress, got type %T", fieldValues[1])
+	}
+
+	if addr, ok := fieldValues[2].(common.Address); ok {
+		variableDebtTokenAddr = addr
+	} else {
+		return nil, fmt.Errorf("failed to extract variableDebtTokenAddress, got type %T", fieldValues[2])
+	}
+
+	// Extract currentLiquidityRate
+	if rate, ok := fieldValues[3].(*big.Int); ok {
+		currentLiquidityRate = rate
+	} else {
+		return nil, fmt.Errorf("failed to extract currentLiquidityRate, got type %T", fieldValues[3])
+	}
+
+	// Parse ERC20 ABI for totalSupply calls
+	erc20ABI, err := abi.JSON(strings.NewReader(erc20ABIJSON))
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse ERC20 ABI: %w", err)
+	}
+
+	// Get totalSupply from aToken
+	totalAToken, err := c.getTokenTotalSupply(ctx, aTokenAddr, erc20ABI)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get aToken totalSupply: %w", err)
+	}
+
+	// Get totalSupply from stableDebtToken
+	totalStableDebt, err := c.getTokenTotalSupply(ctx, stableDebtTokenAddr, erc20ABI)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get stableDebtToken totalSupply: %w", err)
+	}
+
+	// Get totalSupply from variableDebtToken
+	totalVariableDebt, err := c.getTokenTotalSupply(ctx, variableDebtTokenAddr, erc20ABI)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get variableDebtToken totalSupply: %w", err)
 	}
 
 	// Calculate total debt
@@ -246,23 +310,60 @@ func (c *AaveV3Client) GetReserveData(ctx context.Context, tokenAddress common.A
 		utilization = bigRatDiv(totalDebt, totalAToken) * 100.0
 	}
 
-	// Calculate APY from liquidityRate
-	// liquidityRate is in RAY units (1e27), so APY = (liquidityRate / 1e27) * 100
+	// Calculate APY from currentLiquidityRate
+	// currentLiquidityRate is in RAY units (1e27), so APY = (currentLiquidityRate / 1e27) * 100
 	var apy float64
-	if liquidityRate.Sign() > 0 {
-		// Convert RAY to percentage: (liquidityRate / 1e27) * 100
+	if currentLiquidityRate.Sign() > 0 {
+		// Convert RAY to percentage: (currentLiquidityRate / 1e27) * 100
 		ray := new(big.Int).Exp(big.NewInt(10), big.NewInt(27), nil)
-		apy = bigRatDiv(liquidityRate, ray) * 100.0
+		apy = bigRatDiv(currentLiquidityRate, ray) * 100.0
 	}
 
 	return &ReserveData{
 		TotalAToken:       totalAToken,
 		TotalStableDebt:   totalStableDebt,
 		TotalVariableDebt: totalVariableDebt,
-		LiquidityRate:     liquidityRate,
+		LiquidityRate:     currentLiquidityRate,
 		Utilization:       utilization,
 		APY:               apy,
 	}, nil
+}
+
+// getTokenTotalSupply calls totalSupply() on an ERC20 token contract
+func (c *AaveV3Client) getTokenTotalSupply(ctx context.Context, tokenAddr common.Address, erc20ABI abi.ABI) (*big.Int, error) {
+	method, exists := erc20ABI.Methods["totalSupply"]
+	if !exists {
+		return nil, fmt.Errorf("totalSupply method not found in ERC20 ABI")
+	}
+
+	// Pack the input (no parameters for totalSupply)
+	methodID := method.ID
+
+	msg := ethereum.CallMsg{
+		To:   &tokenAddr,
+		Data: methodID,
+	}
+
+	result, err := c.client.CallContract(ctx, msg, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to call totalSupply on token %s: %w", tokenAddr.Hex(), err)
+	}
+
+	unpacked, err := method.Outputs.UnpackValues(result)
+	if err != nil {
+		return nil, fmt.Errorf("failed to unpack totalSupply result: %w", err)
+	}
+
+	if len(unpacked) < 1 {
+		return nil, fmt.Errorf("unexpected number of return values: got %d, expected 1", len(unpacked))
+	}
+
+	totalSupply, ok := unpacked[0].(*big.Int)
+	if !ok {
+		return nil, fmt.Errorf("failed to extract totalSupply")
+	}
+
+	return totalSupply, nil
 }
 
 // GetFieldValue retrieves the value for a specific field (TVL, APY, or UTILIZATION)

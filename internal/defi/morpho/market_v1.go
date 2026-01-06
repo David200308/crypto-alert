@@ -436,6 +436,50 @@ func (c *MorphoV1MarketClient) getTokenTotalSupply(ctx context.Context, tokenAdd
 	return totalSupply, nil
 }
 
+// getTokenDecimals calls decimals() on an ERC20 token contract
+func (c *MorphoV1MarketClient) getTokenDecimals(ctx context.Context, tokenAddr common.Address, erc20ABI abi.ABI) (uint8, error) {
+	method, exists := erc20ABI.Methods["decimals"]
+	if !exists {
+		return 0, fmt.Errorf("decimals method not found in ERC20 ABI")
+	}
+
+	methodID := method.ID
+	msg := ethereum.CallMsg{
+		To:   &tokenAddr,
+		Data: methodID,
+	}
+
+	result, err := c.client.CallContract(ctx, msg, nil)
+	if err != nil {
+		return 0, fmt.Errorf("failed to call decimals on token %s: %w", tokenAddr.Hex(), err)
+	}
+
+	unpacked, err := method.Outputs.UnpackValues(result)
+	if err != nil {
+		return 0, fmt.Errorf("failed to unpack decimals result: %w", err)
+	}
+
+	if len(unpacked) < 1 {
+		return 0, fmt.Errorf("unexpected number of return values: got %d, expected 1", len(unpacked))
+	}
+
+	// decimals() returns uint8
+	decimals, ok := unpacked[0].(uint8)
+	if !ok {
+		// Try to convert from other numeric types
+		switch v := unpacked[0].(type) {
+		case uint64:
+			return uint8(v), nil
+		case *big.Int:
+			return uint8(v.Uint64()), nil
+		default:
+			return 0, fmt.Errorf("failed to extract decimals, got type %T", unpacked[0])
+		}
+	}
+
+	return decimals, nil
+}
+
 // GetFieldValue retrieves the value for a specific field (TVL, LIQUIDITY, or UTILIZATION)
 func (c *MorphoV1MarketClient) GetFieldValue(ctx context.Context, field MarketFieldType) (float64, error) {
 	marketData, err := c.GetMarketData(ctx)
@@ -443,16 +487,34 @@ func (c *MorphoV1MarketClient) GetFieldValue(ctx context.Context, field MarketFi
 		return 0, err
 	}
 
+	// Parse ERC20 ABI to get token decimals
+	erc20ABI, err := abi.JSON(strings.NewReader(getERC20ABI()))
+	if err != nil {
+		return 0, fmt.Errorf("failed to parse ERC20 ABI: %w", err)
+	}
+
+	// Get token decimals from the loan token (the token being supplied/borrowed)
+	tokenDecimals, err := c.getTokenDecimals(ctx, c.loanToken, erc20ABI)
+	if err != nil {
+		return 0, fmt.Errorf("failed to get token decimals: %w", err)
+	}
+
+	// Calculate the divisor based on token decimals (e.g., 6 decimals = 1e6, 18 decimals = 1e18)
+	divisor := new(big.Float).SetInt(new(big.Int).Exp(big.NewInt(10), big.NewInt(int64(tokenDecimals)), nil))
+
 	switch field {
 	case MarketFieldTVL:
-		// TVL is total supply, convert to float64
-		// Note: For USDC (6 decimals), this would be in units of 1e6
-		value, _ := new(big.Float).SetInt(marketData.TotalSupplyAssets).Float64()
-		return value / 1000000.0, nil // Assuming 6 decimals for USDC
+		// TVL is total supply, convert to float64 using actual token decimals
+		value := new(big.Float).SetInt(marketData.TotalSupplyAssets)
+		result := new(big.Float).Quo(value, divisor)
+		resultFloat, _ := result.Float64()
+		return resultFloat, nil
 	case MarketFieldLiquidity:
-		// Liquidity is available supply
-		value, _ := new(big.Float).SetInt(marketData.Liquidity).Float64()
-		return value / 1000000.0, nil // Assuming 6 decimals
+		// Liquidity is available supply, convert to float64 using actual token decimals
+		value := new(big.Float).SetInt(marketData.Liquidity)
+		result := new(big.Float).Quo(value, divisor)
+		resultFloat, _ := result.Float64()
+		return resultFloat, nil
 	case MarketFieldUtilization:
 		return marketData.Utilization, nil
 	default:

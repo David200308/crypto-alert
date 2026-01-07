@@ -21,9 +21,10 @@ type ClientManager struct {
 
 // clientKey uniquely identifies a DeFi client
 type clientKey struct {
-	protocol string
-	category string
-	chainID  string
+	protocol   string
+	category   string
+	chainID    string
+	identifier string // Unique identifier: market_id for Morpho markets, vault_token_address for vaults, token_address for Aave
 }
 
 // NewClientManager creates a new client manager
@@ -69,7 +70,7 @@ func (cm *ClientManager) GetFieldValue(ctx context.Context, rule *core.DeFiAlert
 
 	// Handle Aave v3
 	if rule.Protocol == "aave" && rule.Version == "v3" {
-		key := clientKey{protocol: "aave", chainID: rule.ChainID}
+		key := clientKey{protocol: "aave", chainID: rule.ChainID, identifier: rule.MarketTokenContract}
 		client, ok := cm.clients[key].(*aave.AaveV3Client)
 		if !ok {
 			client, err = aave.NewAaveV3Client(rule.ChainID)
@@ -94,7 +95,7 @@ func (cm *ClientManager) GetFieldValue(ctx context.Context, rule *core.DeFiAlert
 	} else if rule.Protocol == "morpho" && rule.Version == "v1" {
 		// Handle Morpho v1
 		if rule.Category == "market" {
-			key := clientKey{protocol: "morpho", category: "market", chainID: rule.ChainID}
+			key := clientKey{protocol: "morpho", category: "market", chainID: rule.ChainID, identifier: rule.MarketTokenContract}
 			client, ok := cm.clients[key].(*morpho.MorphoV1MarketClient)
 			if !ok {
 				loanToken := rule.BorrowTokenContract
@@ -125,13 +126,13 @@ func (cm *ClientManager) GetFieldValue(ctx context.Context, rule *core.DeFiAlert
 			}
 
 		} else if rule.Category == "vault" {
-			key := clientKey{protocol: "morpho", category: "vault", chainID: rule.ChainID}
+			vaultToken := rule.VaultTokenAddress
+			if vaultToken == "" {
+				vaultToken = rule.MarketTokenContract
+			}
+			key := clientKey{protocol: "morpho", category: "vault", chainID: rule.ChainID, identifier: vaultToken}
 			client, ok := cm.clients[key].(*morpho.MorphoV1VaultClient)
 			if !ok {
-				vaultToken := rule.VaultTokenAddress
-				if vaultToken == "" {
-					vaultToken = rule.MarketTokenContract
-				}
 				depositToken := rule.DepositTokenContract
 				if vaultToken == "" || depositToken == "" {
 					return 0, "", fmt.Errorf("missing required fields for Morpho vault: vault_token_address and deposit_token_contract are required")
@@ -165,13 +166,13 @@ func (cm *ClientManager) GetFieldValue(ctx context.Context, rule *core.DeFiAlert
 	} else if rule.Protocol == "morpho" && rule.Version == "v2" {
 		// Handle Morpho v2
 		if rule.Category == "vault" {
-			key := clientKey{protocol: "morpho", category: "vault", chainID: rule.ChainID}
+			vaultToken := rule.VaultTokenAddress
+			if vaultToken == "" {
+				vaultToken = rule.MarketTokenContract
+			}
+			key := clientKey{protocol: "morpho", category: "vault", chainID: rule.ChainID, identifier: vaultToken}
 			client, ok := cm.clients[key].(*morpho.MorphoV2VaultClient)
 			if !ok {
-				vaultToken := rule.VaultTokenAddress
-				if vaultToken == "" {
-					vaultToken = rule.MarketTokenContract
-				}
 				depositToken := rule.DepositTokenContract
 				if vaultToken == "" || depositToken == "" {
 					return 0, "", fmt.Errorf("missing required fields for Morpho v2 vault: vault_token_address and deposit_token_contract are required")
@@ -205,13 +206,13 @@ func (cm *ClientManager) GetFieldValue(ctx context.Context, rule *core.DeFiAlert
 	} else if rule.Protocol == "kamino" {
 		// Handle Kamino vault
 		if rule.Category == "vault" {
-			key := clientKey{protocol: "kamino", category: "vault", chainID: rule.ChainID}
+			vaultPubkey := rule.VaultTokenAddress
+			if vaultPubkey == "" {
+				vaultPubkey = rule.MarketTokenContract
+			}
+			key := clientKey{protocol: "kamino", category: "vault", chainID: rule.ChainID, identifier: vaultPubkey}
 			client, ok := cm.clients[key].(*kamino.KaminoVaultClient)
 			if !ok {
-				vaultPubkey := rule.VaultTokenAddress
-				if vaultPubkey == "" {
-					vaultPubkey = rule.MarketTokenContract
-				}
 				depositTokenMint := rule.DepositTokenContract
 				if vaultPubkey == "" || depositTokenMint == "" {
 					return 0, "", fmt.Errorf("missing required fields for Kamino vault: vault_token_address and deposit_token_contract are required")

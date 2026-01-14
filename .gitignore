@@ -36,3 +36,7 @@ bin/
 dist/
 
 alert-rules.json
+
+# Log files
+logs/
+*.log

@@ -12,6 +12,7 @@ import (
 	"crypto-alert/internal/config"
 	"crypto-alert/internal/core"
 	"crypto-alert/internal/defi"
+	"crypto-alert/internal/logger"
 	"crypto-alert/internal/message"
 	"crypto-alert/internal/price"
 )
@@ -22,6 +23,12 @@ func main() {
 	if err != nil {
 		log.Fatalf("Failed to load config: %v", err)
 	}
+
+	// Initialize logger with date-based file rotation
+	if err := logger.InitLogger(cfg.LogDir); err != nil {
+		log.Fatalf("Failed to initialize logger: %v", err)
+	}
+	defer logger.GetLogger().Close()
 
 	// Initialize components
 	pythClient := price.NewPythClient(cfg.PythAPIURL, cfg.PythAPIKey)

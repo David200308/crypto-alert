@@ -23,6 +23,9 @@ type Config struct {
 	// Alert Configuration
 	CheckInterval  int    // in seconds
 	AlertRulesFile string // Path to JSON file containing alert rules
+
+	// Logging Configuration
+	LogDir string // Directory for log files (default: "logs")
 }
 
 // LoadConfig loads configuration from environment variables
@@ -37,6 +40,7 @@ func LoadConfig() (*Config, error) {
 		ResendFromEmail: getEnv("RESEND_FROM_EMAIL", ""),
 		CheckInterval:   60, // Default 60 seconds
 		AlertRulesFile:  getEnv("ALERT_RULES_FILE", "alert-rules.json"),
+		LogDir:          getEnv("LOG_DIR", "logs"), // Default log directory
 	}
 
 	return config, nil

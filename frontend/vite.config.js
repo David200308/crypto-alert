@@ -16,7 +16,7 @@ export default defineConfig({
   plugins: [react()],
   server: {
     port: 3030,
-    host: '0.0.0.0', // Allow external connections (needed for Docker)
+    host: 'localhost', // Local development
     proxy: {
       '/api': {
         target: getBackendUrl(),
@@ -27,10 +27,7 @@ export default defineConfig({
   },
   preview: {
     port: 3030,
-    host: '0.0.0.0', // Allow external connections (needed for Docker)
-    allowedHosts: [
-      'crypto-alert.log.skyproton.com',
-    ],
+    host: 'localhost', // Local preview
     proxy: {
       '/api': {
         target: getBackendUrl(),

@@ -28,6 +28,9 @@ export default defineConfig({
   preview: {
     port: 3030,
     host: '0.0.0.0', // Allow external connections (needed for Docker)
+    allowedHosts: [
+      'crypto-alert.log.skyproton.com',
+    ],
     proxy: {
       '/api': {
         target: getBackendUrl(),

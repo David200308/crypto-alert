@@ -1,156 +1,222 @@
 # Crypto Alert System
 
-A Go-based Cryptocurrency price / DeFi protocol data alert system that monitors prices from Oracle / protocol contract and sends alerts when thresholds are met.
+A comprehensive cryptocurrency alert system that monitors DeFi protocols and price feeds, sending alerts via email when configured thresholds are met.
+
+## Features
+
+- 📊 **Price Monitoring**: Monitor cryptocurrency prices using Pyth Network oracle
+- 🏦 **DeFi Protocol Monitoring**: Track TVL, utilization, and liquidity across multiple protocols:
+  - Aave v3
+  - Morpho v1/v2 (Markets & Vaults)
+  - Kamino v2 (Solana)
+- 📧 **Email Alerts**: Send formatted email alerts via Resend API
+- 📝 **Date-based Logging**: Automatic log rotation by date (yyyyMMdd.log format)
+- 🖥️ **Web Dashboard**: React-based log viewer frontend
 
 ## Project Structure
 
 ```
 crypto-alert/
-├── alert-rules.json
-├── cmd
-│   └── main.go
-├── go.mod
-├── go.sum
-├── internal
-│   ├── config
-│   │   └── config.go
-│   ├── core
-│   │   ├── decision_test.go
-│   │   └── decision.go
-│   ├── defi
-│   │   ├── aave
-│   │   │   ├── abi
-│   │   │   │   ├── erc20.json
-│   │   │   │   └── pool.json
-│   │   │   └── v3.go
-│   │   ├── defi.go
-│   │   ├── kamino
-│   │   │   └── vault_v2.go
-│   │   └── morpho
-│   │       ├── abi
-│   │       │   ├── erc20.json
-│   │       │   └── market.json
-│   │       ├── market_v1.go
-│   │       ├── vault_v1.go
-│   │       └── vault_v2.go
-│   ├── message
-│   │   ├── email_template.go
-│   │   └── sender.go
-│   └── price
-│       └── pyth.go
-├── Makefile
-└── README.md
+├── cmd/
+│   ├── main.go          # Main application
+│   └── api/
+│       └── main.go       # Log API server
+├── internal/
+│   ├── config/          # Configuration management
+│   ├── core/            # Decision engine
+│   ├── defi/            # DeFi protocol clients
+│   ├── logger/          # Date-based logging
+│   ├── message/         # Email sending
+│   └── price/           # Price oracle client
+├── frontend/            # React log viewer
+├── logs/               # Log files (created automatically)
+└── alert-rules.json    # Alert configuration
 ```
 
-## Token Price Oracle Integration
+## Prerequisites
 
-- Pyth
-
-## DeFi Integration
-
-| DeFi Protocol | Market / Vault | Version | Chain          | TVL  | APY  | UTILIZATION | LIQUIDITY |
-| ------------- | -------------- | ------- | -------------- | ---- | ---- | ----------- | --------- |
-| AAVE          | Market         | V3      | ETH, Base, ARB | ✔️ | ✔️ | ✔️        | ✔️      |
-| Morpho        | Market         | V1      | ETH, Base, ARB | ✔️ | ❌   | ✔️        | ✔️      |
-| Morpho        | Vault          | V1      | ETH, Base, ARB | ✔️ | ✔️ | ✔️        | ✔️      |
-| Morpho        | Vault          | V2      | ETH, Base, ARB | ✔️ | ✔️ | ✔️        | ✔️      |
-| Kamino        | Vault          | V2      | Solana         | ✔️ | ✔️ | ✔️        | ✔️      |
+- Go 1.21+
+- Node.js 18+ (for frontend)
+- Environment variables configured (see Configuration)
 
 ## Installation
 
-1. **Clone the repository**:
+### Backend
 
+1. Clone the repository
+2. Install dependencies:
 ```bash
-git clone <repository-url>
-cd crypto-alert
+make deps
 ```
 
-2. **Install dependencies**:
-
+3. Build the application:
 ```bash
-go mod download
+make build
 ```
 
-3. **Set up environment variables**:
+### Frontend
 
+1. Navigate to frontend directory:
 ```bash
-cp .env.example .env ## remember to edit the .env file & alert-rules.json
+cd frontend
+```
+
+2. Install dependencies:
+```bash
+npm install
+```
+
+## Configuration
+
+Create a `.env` file in the root directory:
+
+```env
+# Pyth Oracle
+PYTH_API_URL=https://hermes.pyth.network
+PYTH_API_KEY=your_pyth_api_key
+
+# Resend Email
+RESEND_API_KEY=your_resend_api_key
+RESEND_FROM_EMAIL=noreply@yourdomain.com
+
+# Application
+ALERT_RULES_FILE=alert-rules.json
+CHECK_INTERVAL=60
+LOG_DIR=logs
+
+# API Server (optional)
+API_PORT=8181
 ```
 
 ## Usage
 
-### Basic Usage
-
-Run the application:
+### Running the Alert System
 
 ```bash
-go run cmd/main.go
+make run
+# or
+./bin/crypto-alert
 ```
 
-### Building
-
-Build the binary:
+### Running the Log API Server
 
 ```bash
-go build -o crypto-alert cmd/main.go
+make run-api
+# or
+./bin/log-api
 ```
 
-Run the binary:
+The API server will run on port 8181 by default (configurable via `API_PORT`).
+
+### Running the Frontend
+
+#### Option 1: Local Development
 
 ```bash
-./crypto-alert
+make frontend-dev
+# or
+cd frontend && npm run dev
 ```
 
-## Setting Up Alert Rules
+The frontend will be available at `http://localhost:3000`
 
-Alert rules are configured in a JSON file (`alert-rules.json` by default). You can specify a custom path using the `ALERT_RULES_FILE` environment variable.
+#### Option 2: Docker (Production)
 
-### JSON Format
+```bash
+# Build and run with Docker Compose
+docker-compose up -d
 
-Create an `alert-rules.json` file in the project root:
+# Or build manually
+cd frontend
+docker build -t crypto-alert-frontend .
+docker run -p 3000:3000 --add-host=host.docker.internal:host-gateway crypto-alert-frontend
+```
+
+The frontend will be available at `http://localhost:3000`
+
+#### Option 3: Docker (Development with Hot Reload)
+
+```bash
+docker-compose -f docker-compose.dev.yml up
+```
+
+**Note**: When running the frontend in Docker, make sure the backend API server is running on `localhost:8181` on your host machine. The Docker container uses `host.docker.internal` to access the host's localhost.
+
+## Alert Rules Configuration
+
+Alert rules are configured in `alert-rules.json`. See `alert-rules.example.json` for examples.
+
+### Price Alert Example
 
 ```json
-[
-  {
-    "symbol": "BTC/USD",
-    "threshold": 100000.0,
-    "direction": ">=",
-    "enabled": true,
-    "recipient_email": "alerts@example.com"
+{
+  "symbol": "SOL/USD",
+  "price_feed_id": "0x...",
+  "threshold": 150.0,
+  "direction": ">=",
+  "enabled": true,
+  "frequency": {
+    "number": 3,
+    "unit": "HOUR"
   },
-  {
-    "symbol": "ETH/USD",
-    "threshold": 5000.0,
-    "direction": "<=",
-    "enabled": true,
-    "recipient_email": "alerts@example.com"
-  },
-  {
-    "symbol": "SOL/USD",
-    "threshold": 150.0,
-    "direction": ">",
-    "enabled": false,
-    "recipient_email": "alerts@example.com"
-  },
-  {
-    "symbol": "USDC/USD",
-    "threshold": 1.0,
-    "direction": "=",
-    "enabled": true,
-    "recipient_email": "alerts@example.com"
-  }
-]
+  "recipient_email": "your@email.com"
+}
 ```
 
-### Rule Fields
+### DeFi Alert Example
 
-- **symbol**: The cryptocurrency pair (e.g., "BTC/USD", "ETH/USD")
-- **threshold**: The price threshold to monitor
-- **direction**: Comparison operator - one of: `">="`, `">"`, `"="`, `"<="`, `"<"`
-  - `">="`: Triggers when price is greater than or equal to threshold
-  - `">"`: Triggers when price is greater than threshold
-  - `"="`: Triggers when price equals threshold (within 0.01 tolerance)
-  - `"<="`: Triggers when price is less than or equal to threshold
-  - `"<"`: Triggers when price is less than threshold
-- **enabled**: `true` to enable the rule, `false` to disable it
-- **recipient_email**: Email address to send alerts to (required for each rule)
+```json
+{
+  "protocol": "morpho",
+  "category": "market",
+  "version": "v1",
+  "chain_id": "8453",
+  "market_id": "0x...",
+  "market_token_pair": "weETH/USDC",
+  "borrow_token_contract": "0x...",
+  "collateral_token_contract": "0x...",
+  "field": "TVL",
+  "direction": "<=",
+  "threshold": 5000,
+  "enabled": true,
+  "frequency": {
+    "unit": "ONCE"
+  },
+  "recipient_email": "your@email.com"
+}
+```
+
+## Logging
+
+Logs are automatically written to the `logs/` directory (or directory specified by `LOG_DIR`):
+- Format: `yyyyMMdd.log` (e.g., `20260107.log`)
+- New file created each day
+- Logs are written to both stdout and log files
+
+## API Endpoints
+
+The log API server provides the following endpoints:
+
+- `GET /api/logs/dates` - Returns array of available log dates
+- `GET /api/logs/:date` - Returns log content for a specific date (format: yyyyMMdd)
+
+## Development
+
+### Format Code
+```bash
+make fmt
+```
+
+### Run Tests
+```bash
+make test
+```
+
+### Lint Code
+```bash
+make lint
+```
+
+## License
+
+MIT

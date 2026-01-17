@@ -27,7 +27,10 @@ export default defineConfig({
   },
   preview: {
     port: 3030,
-    host: 'localhost', // Local preview
+    host: '0.0.0.0', // Allow external connections
+    allowedHosts: [
+      'crypto-alert.log.skyproton.com',
+    ],
     proxy: {
       '/api': {
         target: getBackendUrl(),

@@ -7,7 +7,7 @@ services:
       dockerfile: Dockerfile
     container_name: crypto-alert-frontend
     ports:
-      - "3000:3000"
+      - "3030:3000"
     environment:
       - NODE_ENV=production
       - BACKEND_URL=http://host.docker.internal:8181

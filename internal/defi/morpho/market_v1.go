@@ -5,25 +5,15 @@ import (
 	_ "embed"
 	"fmt"
 	"math/big"
-	"os"
 	"strings"
+
+	"crypto-alert/internal/utils"
 
 	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/ethclient"
-	"github.com/joho/godotenv"
 )
-
-var envLoaded bool
-
-// ensureEnvLoaded ensures the .env file is loaded (idempotent)
-func ensureEnvLoaded() {
-	if !envLoaded {
-		_ = godotenv.Load() // Ignore error if .env doesn't exist
-		envLoaded = true
-	}
-}
 
 //go:embed abi/erc20.json
 var erc20ABIJSON string
@@ -80,19 +70,10 @@ var morphoMarketAddresses = map[string]common.Address{
 	"42161": common.HexToAddress("0x6c247b1F6182318877311737BaC0844bAa518F5e"), // Morpho Market on Arbitrum One (verified)
 }
 
-// getRPCURLForChain returns the RPC URL for a given chain ID
+// getRPCURLForChain returns a randomly selected RPC URL for a given chain ID.
+// Supports comma-separated RPC URLs in env vars for load balancing.
 func getRPCURLForChain(chainID string) string {
-	ensureEnvLoaded()
-	switch chainID {
-	case "1":
-		return getEnv("ETH_RPC_URL", "")
-	case "8453":
-		return getEnv("BASE_RPC_URL", "")
-	case "42161":
-		return getEnv("ARB_RPC_URL", "")
-	default:
-		return ""
-	}
+	return utils.GetRPCURLForChain(chainID)
 }
 
 // MarketData holds market data from Morpho v1
@@ -548,12 +529,4 @@ func bigRatDiv(a, b *big.Int) float64 {
 	r := new(big.Rat).SetFrac(a, b)
 	f, _ := r.Float64()
 	return f
-}
-
-// getEnv gets an environment variable or returns a default value
-func getEnv(key, defaultValue string) string {
-	if value := os.Getenv(key); value != "" {
-		return value
-	}
-	return defaultValue
 }

@@ -5,27 +5,17 @@ import (
 	_ "embed"
 	"fmt"
 	"math/big"
-	"os"
 	"reflect"
 	"strings"
+
+	"crypto-alert/internal/utils"
 
 	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/ethclient"
-	"github.com/joho/godotenv"
 )
-
-var envLoaded bool
-
-// ensureEnvLoaded ensures the .env file is loaded (idempotent)
-func ensureEnvLoaded() {
-	if !envLoaded {
-		_ = godotenv.Load() // Ignore error if .env doesn't exist
-		envLoaded = true
-	}
-}
 
 //go:embed abi/pool.json
 var poolABIJSON string
@@ -59,19 +49,10 @@ var supportedChains = map[string]ChainInfo{
 	},
 }
 
-// getRPCURLForChain returns the RPC URL for a given chain ID
+// getRPCURLForChain returns a randomly selected RPC URL for a given chain ID.
+// Supports comma-separated RPC URLs in env vars for load balancing.
 func getRPCURLForChain(chainID string) string {
-	ensureEnvLoaded() // Ensure .env is loaded before reading env vars
-	switch chainID {
-	case "1":
-		return getEnv("ETH_RPC_URL", "")
-	case "8453":
-		return getEnv("BASE_RPC_URL", "")
-	case "42161":
-		return getEnv("ARB_RPC_URL", "")
-	default:
-		return ""
-	}
+	return utils.GetRPCURLForChain(chainID)
 }
 
 // Pool contract addresses for each chain (proxy contracts)
@@ -429,12 +410,4 @@ func bigRatDiv(a, b *big.Int) float64 {
 	r := new(big.Rat).SetFrac(a, b)
 	f, _ := r.Float64()
 	return f
-}
-
-// getEnv gets an environment variable or returns a default value
-func getEnv(key, defaultValue string) string {
-	if value := os.Getenv(key); value != "" {
-		return value
-	}
-	return defaultValue
 }

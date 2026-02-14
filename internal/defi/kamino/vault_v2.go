@@ -7,21 +7,10 @@ import (
 	"io"
 	"math/big"
 	"net/http"
-	"os"
 	"time"
 
-	"github.com/joho/godotenv"
+	"crypto-alert/internal/utils"
 )
-
-var envLoaded bool
-
-// ensureEnvLoaded ensures the .env file is loaded (idempotent)
-func ensureEnvLoaded() {
-	if !envLoaded {
-		_ = godotenv.Load() // Ignore error if .env doesn't exist
-		envLoaded = true
-	}
-}
 
 // VaultFieldType represents the type of field to monitor for vaults
 type VaultFieldType string
@@ -66,21 +55,13 @@ var supportedChains = map[string]ChainInfo{
 	},
 }
 
-// getRPCURLForChain returns the RPC URL for Solana chain ID
+// getRPCURLForChain returns a randomly selected RPC URL for Solana chain ID.
+// Supports comma-separated RPC URLs in env vars for load balancing.
 func getRPCURLForChain(chainID string) string {
-	ensureEnvLoaded() // Ensure .env is loaded before reading env vars
 	if chainID == "solana" || chainID == "101" {
-		return getEnv("SOLANA_RPC_URL", "")
+		return utils.GetSolanaRPCURL()
 	}
 	return ""
-}
-
-// getEnv gets an environment variable or returns a default value
-func getEnv(key, defaultValue string) string {
-	if value := os.Getenv(key); value != "" {
-		return value
-	}
-	return defaultValue
 }
 
 // KaminoVaultClient handles interactions with Kamino Vaults via REST API

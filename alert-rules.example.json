@@ -146,8 +146,6 @@
     "protocol": "aave",
     "version": "v3",
     "chain_id": "1",
-    "market_token_name": "USDC",
-    "market_token_contract": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
     "field": "TVL",
     "direction": "<=",
     "threshold": 3000000000,
@@ -156,17 +154,17 @@
       "number": 1,
       "unit": "HOUR"
     },
-    "recipient_email": ""
+    "recipient_email": "",
+    "params": {
+      "market_token_name": "USDC",
+      "market_token_contract": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"
+    }
   },
   {
     "protocol": "morpho",
     "category": "market",
     "version": "v1",
     "chain_id": "8453",
-    "market_id": "0xa4e2843486610e6851f4e0a8fcdee819958598c71c7e99b0315904ccf162ddc3",
-    "market_token_pair": "weETH/USDC",
-    "borrow_token_contract": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
-    "collateral_token_contract": "0x04C0599Ae5A44757c0af6F9eC3b93da8976c150A",
     "field": "TVL",
     "direction": "<=",
     "threshold": 8000,
@@ -174,16 +172,19 @@
     "frequency": {
       "unit": "ONCE"
     },
-    "recipient_email": ""
+    "recipient_email": "",
+    "params": {
+      "market_id": "0xa4e2843486610e6851f4e0a8fcdee819958598c71c7e99b0315904ccf162ddc3",
+      "market_token_pair": "weETH/USDC",
+      "borrow_token_contract": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+      "collateral_token_contract": "0x04C0599Ae5A44757c0af6F9eC3b93da8976c150A"
+    }
   },
   {
     "protocol": "morpho",
     "category": "vault",
     "version": "v1",
     "chain_id": "8453",
-    "vault_name": "",
-    "vault_token_address": "",
-    "deposit_token_contract": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
     "field": "TVL",
     "direction": "<=",
     "threshold": 3000,
@@ -191,16 +192,18 @@
     "frequency": {
       "unit": "ONCE"
     },
-    "recipient_email": ""
+    "recipient_email": "",
+    "params": {
+      "vault_name": "",
+      "vault_token_address": "",
+      "deposit_token_contract": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913"
+    }
   },
   {
     "protocol": "kamino",
     "category": "vault",
     "version": "v2",
     "chain_id": "solana",
-    "vault_name": "USDC Prime",
-    "vault_token_address": "HDsayqAsDWy3QvANGqh2yNraqcD8Fnjgh73Mhb3WRS5E",
-    "deposit_token_contract": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
     "field": "TVL",
     "direction": "<=",
     "threshold": 100000000,
@@ -208,6 +211,11 @@
     "frequency": {
       "unit": "ONCE"
     },
-    "recipient_email": ""
+    "recipient_email": "",
+    "params": {
+      "vault_name": "USDC Prime",
+      "vault_token_address": "HDsayqAsDWy3QvANGqh2yNraqcD8Fnjgh73Mhb3WRS5E",
+      "deposit_token_contract": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"
+    }
   }
 ]

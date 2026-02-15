@@ -84,7 +84,7 @@ services:
       ES_ADDRESSES: http://es01:9200
       ES_INDEX: crypto-alert-logs
       ALERT_RULES_FILE: /app/alert-rules.json
-      ALERT_RULES_SOURCE: ${ALERT_RULES_SOURCE:-file}
+      ALERT_RULES_SOURCE: ${ALERT_RULES_SOURCE:-mysql}
       MYSQL_DSN: ${MYSQL_DSN:-cryptoalert:cryptoalert@tcp(mysql:3306)/web3?parseTime=true}
     env_file:
       - .env

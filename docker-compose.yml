@@ -1,0 +1,22 @@
+services:
+  es01:
+    image: docker.elastic.co/elasticsearch/elasticsearch:9.3.0
+    container_name: es01
+    networks:
+      - esnet
+    ports:
+      - "0.0.0.0:9200:9200"
+      - "0.0.0.0:9300:9300"
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+    deploy:
+      resources:
+        limits:
+          memory: 1GB
+    restart: unless-stopped
+
+networks:
+  esnet:
+    driver: bridge
+    name: esnet

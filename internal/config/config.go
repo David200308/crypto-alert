@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strings"
 
 	"crypto-alert/internal/core"
 
@@ -26,6 +27,11 @@ type Config struct {
 
 	// Logging Configuration
 	LogDir string // Directory for log files (default: "logs")
+
+	// Elasticsearch Configuration (optional, for log shipping)
+	ESEnabled   bool     // Enable shipping logs to Elasticsearch
+	ESAddresses []string // ES endpoints, e.g. []string{"http://localhost:9200"}
+	ESIndex     string   // Index name for logs (default: "crypto-alert-logs")
 }
 
 // LoadConfig loads configuration from environment variables
@@ -41,6 +47,9 @@ func LoadConfig() (*Config, error) {
 		CheckInterval:   60, // Default 60 seconds
 		AlertRulesFile:  getEnv("ALERT_RULES_FILE", "alert-rules.json"),
 		LogDir:          getEnv("LOG_DIR", "logs"), // Default log directory
+		ESEnabled:       getEnvBool("ES_ENABLED", true),
+		ESAddresses:     getEnvSlice("ES_ADDRESSES", []string{"http://localhost:9200"}),
+		ESIndex:         getEnv("ES_INDEX", "crypto-alert-logs"),
 	}
 
 	return config, nil
@@ -407,4 +416,38 @@ func getEnv(key, defaultValue string) string {
 		return value
 	}
 	return defaultValue
+}
+
+// getEnvBool returns true if the env var is set to "1", "true", "yes" (case-insensitive)
+func getEnvBool(key string, defaultValue bool) bool {
+	v := os.Getenv(key)
+	if v == "" {
+		return defaultValue
+	}
+	switch v {
+	case "1", "true", "yes", "TRUE", "YES":
+		return true
+	case "0", "false", "no", "FALSE", "NO":
+		return false
+	}
+	return defaultValue
+}
+
+// getEnvSlice returns a slice from a comma-separated env var; if empty, returns defaultSlice
+func getEnvSlice(key string, defaultSlice []string) []string {
+	v := os.Getenv(key)
+	if v == "" {
+		return defaultSlice
+	}
+	var out []string
+	for _, s := range strings.Split(v, ",") {
+		s = strings.TrimSpace(s)
+		if s != "" {
+			out = append(out, s)
+		}
+	}
+	if len(out) == 0 {
+		return defaultSlice
+	}
+	return out
 }

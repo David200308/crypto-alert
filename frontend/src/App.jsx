@@ -2,14 +2,14 @@ import { useState, useEffect, useRef } from 'react'
 import { RefreshCw, Calendar, AlertCircle, Loader, Search } from 'lucide-react'
 
 function App() {
-  const [logs, setLogs] = useState([])
-  const [filteredLogs, setFilteredLogs] = useState([])
+  const [logs, setLogs] = useState([])           // { message, ts }[]
   const [selectedDate, setSelectedDate] = useState('')
   const [availableDates, setAvailableDates] = useState([])
-  const [searchTerm, setSearchTerm] = useState('')
+  const [searchTerm, setSearchTerm] = useState('')  // sent to backend as ?q=
   const [loading, setLoading] = useState(false)
   const [autoRefresh, setAutoRefresh] = useState(true)
   const [error, setError] = useState(null)
+  const [nextCursor, setNextCursor] = useState('')  // for incremental fetch: only get logs after this
   const logEndRef = useRef(null)
   const scrollContainerRef = useRef(null)
 
@@ -29,68 +29,80 @@ function App() {
     }
   }
 
-  // Fetch logs for selected date
-  const fetchLogs = async (date) => {
+  // Fetch logs: full load (no after) or incremental (after=nextCursor). Search is always sent as ?q=.
+  const fetchLogs = async (date, append = false) => {
     if (!date) return
-    
+
+    const cursor = append ? nextCursor : ''
+    const params = new URLSearchParams()
+    if (cursor) params.set('after', cursor)
+    if (searchTerm.trim()) params.set('q', searchTerm.trim())
+    const query = params.toString()
+    const url = `/api/logs/${date}${query ? `?${query}` : ''}`
+
     setLoading(true)
     setError(null)
     try {
-      const response = await fetch(`/api/logs/${date}`)
+      const response = await fetch(url)
       if (!response.ok) {
         throw new Error(`Failed to fetch logs: ${response.statusText}`)
       }
       const data = await response.json()
-      setLogs(data.logs || [])
+      const newLogs = data.logs || []
+      if (append && logs.length > 0) {
+        setLogs(prev => [...prev, ...newLogs])
+      } else {
+        setLogs(newLogs)
+      }
+      setNextCursor(data.nextCursor || '')
     } catch (err) {
       setError(err.message)
-      setLogs([])
+      if (!append) setLogs([])
     } finally {
       setLoading(false)
     }
   }
-
-  // Filter logs based on search term
-  useEffect(() => {
-    if (!searchTerm.trim()) {
-      setFilteredLogs(logs)
-    } else {
-      const term = searchTerm.toLowerCase()
-      const filtered = logs.filter(log => 
-        log.toLowerCase().includes(term)
-      )
-      setFilteredLogs(filtered)
-    }
-  }, [logs, searchTerm])
 
   // Auto-scroll to bottom when new logs arrive
   useEffect(() => {
     if (autoRefresh && logEndRef.current) {
       logEndRef.current.scrollIntoView({ behavior: 'smooth' })
     }
-  }, [filteredLogs, autoRefresh])
+  }, [logs, autoRefresh])
 
   // Initial load
   useEffect(() => {
     fetchAvailableDates()
   }, [])
 
-  // Fetch logs when date changes
+  // Fetch logs when date changes (full load)
   useEffect(() => {
     if (selectedDate) {
-      fetchLogs(selectedDate)
+      fetchLogs(selectedDate, false)
     }
   }, [selectedDate])
 
-  // Auto-refresh every 30 seconds
+  // When user types in search: debounce then full load with ?q= (backend does the search)
   useEffect(() => {
-    if (autoRefresh && selectedDate) {
-      const interval = setInterval(() => {
-        fetchLogs(selectedDate)
-      }, 30300) // 30 seconds
-      return () => clearInterval(interval)
-    }
-  }, [autoRefresh, selectedDate])
+    if (!selectedDate) return
+    const t = setTimeout(() => {
+      fetchLogs(selectedDate, false) // fetchLogs already sends searchTerm as ?q=
+    }, 400)
+    return () => clearTimeout(t)
+  }, [searchTerm, selectedDate]) // run when search term or date changes so ?q= is applied
+
+  // Auto-refresh every 30s: incremental (only new logs after nextCursor) when cursor exists, else full fetch
+  useEffect(() => {
+    if (!autoRefresh || !selectedDate) return
+    const interval = setInterval(() => {
+      if (nextCursor) {
+        fetchLogs(selectedDate, true)
+      } else {
+        fetchLogs(selectedDate, false)
+      }
+    }, 30000)
+    return () => clearInterval(interval)
+  }, [autoRefresh, selectedDate, nextCursor])
 
   // Format date for display
   const formatDateDisplay = (dateStr) => {
@@ -125,7 +137,7 @@ function App() {
             <button 
               onClick={() => {
                 fetchAvailableDates()
-                if (selectedDate) fetchLogs(selectedDate)
+                if (selectedDate) fetchLogs(selectedDate, false)
               }}
               className="flex items-center gap-2 bg-blue-500 text-white border-none px-4 py-2 rounded-md cursor-pointer text-sm transition-colors hover:bg-blue-600 disabled:opacity-60 disabled:cursor-not-allowed w-full md:w-auto"
               disabled={loading}
@@ -176,23 +188,17 @@ function App() {
 
         {!loading && logs.length === 0 && !error && (
           <div className="text-center py-12 text-dark-text-secondary text-base">
-            No logs found for {formatDateDisplay(selectedDate)}
+            {searchTerm ? `No logs match "${searchTerm}" for ${formatDateDisplay(selectedDate)}` : `No logs found for ${formatDateDisplay(selectedDate)}`}
           </div>
         )}
 
-        {!loading && filteredLogs.length === 0 && logs.length > 0 && (
-          <div className="text-center py-12 text-dark-text-secondary text-base">
-            No logs match your search "{searchTerm}"
-          </div>
-        )}
-
-        {filteredLogs.map((log, index) => (
+        {logs.map((entry, index) => (
           <div 
-            key={index} 
+            key={entry.ts ? `${entry.ts}-${index}` : index} 
             className="p-3 mb-2 rounded-lg bg-dark-surface border-l-[3px] border-l-blue-500 hover:bg-dark-surface-hover transition-colors"
           >
             <div className="text-dark-text text-sm break-words whitespace-pre-wrap font-mono">
-              {log}
+              {typeof entry === 'string' ? entry : entry.message}
             </div>
           </div>
         ))}
@@ -202,10 +208,7 @@ function App() {
       <footer className="bg-dark-surface border-t border-dark-border px-8 py-3">
         <div className="flex justify-between items-center text-dark-text-muted text-sm flex-col md:flex-row gap-2 md:gap-0">
           <span>
-            {searchTerm 
-              ? `Showing: ${filteredLogs.length} / ${logs.length} logs`
-              : `Total: ${logs.length} logs`
-            }
+            {searchTerm ? `Search: "${searchTerm}" — ` : ''}Total: {logs.length} logs
           </span>
           {selectedDate && (
             <span>Viewing: {formatDateDisplay(selectedDate)}</span>

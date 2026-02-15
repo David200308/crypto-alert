@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"crypto-alert/internal/config"
+	"crypto-alert/internal/logapi"
 )
 
 func main() {
@@ -32,6 +33,20 @@ func main() {
 		log.Fatalf("Failed to create log directory: %v", err)
 	}
 
+	// Optional: ES client for log data (when ES is enabled)
+	var esLog *logapi.ESClient
+	if cfg.ESEnabled && len(cfg.ESAddresses) > 0 && cfg.ESIndex != "" {
+		var err error
+		esLog, err = logapi.NewESClient(cfg.ESAddresses, cfg.ESIndex)
+		if err != nil {
+			log.Printf("⚠️ Elasticsearch log source disabled: %v", err)
+			esLog = nil
+		} else {
+			defer esLog.Close()
+			log.Printf("📊 Log API will also read from Elasticsearch index: %s", cfg.ESIndex)
+		}
+	}
+
 	// CORS middleware
 	corsHandler := func(next http.HandlerFunc) http.HandlerFunc {
 		return func(w http.ResponseWriter, r *http.Request) {
@@ -48,13 +63,13 @@ func main() {
 		}
 	}
 
-	// Setup routes with CORS
+	// Setup routes with CORS (data from files and/or Elasticsearch)
 	http.HandleFunc("/api/logs/dates", corsHandler(func(w http.ResponseWriter, r *http.Request) {
-		handleGetDates(w, r, logDir)
+		handleGetDates(w, r, logDir, esLog)
 	}))
 
 	http.HandleFunc("/api/logs/", corsHandler(func(w http.ResponseWriter, r *http.Request) {
-		handleGetLogs(w, r, logDir)
+		handleGetLogs(w, r, logDir, esLog)
 	}))
 
 	port := os.Getenv("API_PORT")
@@ -67,104 +82,116 @@ func main() {
 	log.Fatal(http.ListenAndServe(":"+port, nil))
 }
 
-func handleGetDates(w http.ResponseWriter, r *http.Request, logDir string) {
+var emailRegex = regexp.MustCompile(`[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}`)
+
+func maskEmails(s string) string {
+	return emailRegex.ReplaceAllStringFunc(s, func(email string) string {
+		return "[email@address]"
+	})
+}
+
+func handleGetDates(w http.ResponseWriter, r *http.Request, logDir string, esLog *logapi.ESClient) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 
+	dateSet := make(map[string]struct{})
+
+	// From Elasticsearch
+	if esLog != nil {
+		dates, err := esLog.GetDates(r.Context())
+		if err != nil {
+			log.Printf("ES GetDates error: %v", err)
+		} else {
+			for _, d := range dates {
+				dateSet[d] = struct{}{}
+			}
+		}
+	}
+
+	// From log files
 	files, err := os.ReadDir(logDir)
 	if err != nil {
 		http.Error(w, fmt.Sprintf("Failed to read log directory: %v", err), http.StatusInternalServerError)
 		return
 	}
-
-	dates := []string{}
 	for _, file := range files {
 		if file.IsDir() {
 			continue
 		}
-
 		name := file.Name()
-		// Check if file matches yyyyMMdd.log format
 		if len(name) == 12 && strings.HasSuffix(name, ".log") {
 			dateStr := name[:8]
-			// Validate date format
 			if _, err := time.Parse("20060102", dateStr); err == nil {
-				dates = append(dates, dateStr)
+				dateSet[dateStr] = struct{}{}
 			}
 		}
 	}
 
-	// Sort dates descending (most recent first)
+	dates := make([]string, 0, len(dateSet))
+	for d := range dateSet {
+		dates = append(dates, d)
+	}
 	sort.Sort(sort.Reverse(sort.StringSlice(dates)))
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(dates)
 }
 
-func handleGetLogs(w http.ResponseWriter, r *http.Request, logDir string) {
+func handleGetLogs(w http.ResponseWriter, r *http.Request, logDir string, esLog *logapi.ESClient) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 
-	// Extract date from URL path: /api/logs/20260107
 	path := strings.TrimPrefix(r.URL.Path, "/api/logs/")
 	if path == "" {
 		http.Error(w, "Date parameter required", http.StatusBadRequest)
 		return
 	}
-
-	// Validate date format (yyyyMMdd)
 	if len(path) != 8 {
 		http.Error(w, "Invalid date format. Expected yyyyMMdd", http.StatusBadRequest)
 		return
 	}
-
-	// Validate date is parseable
 	if _, err := time.Parse("20060102", path); err != nil {
 		http.Error(w, "Invalid date format. Expected yyyyMMdd", http.StatusBadRequest)
 		return
 	}
 
-	logFile := filepath.Join(logDir, fmt.Sprintf("%s.log", path))
+	after := strings.TrimSpace(r.URL.Query().Get("after")) // cursor: only return logs after this timestamp (RFC3339)
+	searchQ := strings.TrimSpace(r.URL.Query().Get("q"))   // search: filter by message content (backend-side)
 
-	// Check if file exists
-	if _, err := os.Stat(logFile); os.IsNotExist(err) {
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{
-			"logs": []string{},
-		})
-		return
-	}
+	var entries []logapi.LogEntry
+	var nextCursor string
 
-	// Read log file
-	content, err := os.ReadFile(logFile)
-	if err != nil {
-		http.Error(w, fmt.Sprintf("Failed to read log file: %v", err), http.StatusInternalServerError)
-		return
-	}
-
-	// Split into lines
-	lines := strings.Split(string(content), "\n")
-	// Filter out empty lines and mask email addresses
-	logLines := []string{}
-	emailRegex := regexp.MustCompile(`[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}`)
-	
-	for _, line := range lines {
-		trimmed := strings.TrimSpace(line)
-		if trimmed != "" {
-			// Mask email addresses
-			maskedLine := emailRegex.ReplaceAllStringFunc(line, func(email string) string {
-				return "[email@address]"
-			})
-			logLines = append(logLines, maskedLine)
+	// Prefer Elasticsearch when available
+	if esLog != nil {
+		ents, cursor, err := esLog.GetLogsForDate(r.Context(), path, after, searchQ)
+		if err != nil {
+			log.Printf("ES GetLogsForDate error: %v", err)
+		} else if len(ents) > 0 {
+			entries = ents
+			nextCursor = cursor
 		}
+	}
+
+	// Fall back to file when no ES data
+	if len(entries) == 0 {
+		logFile := filepath.Join(logDir, fmt.Sprintf("%s.log", path))
+		if content, err := os.ReadFile(logFile); err == nil {
+			entries, nextCursor = logapi.GetLogsFromFile(string(content), after, searchQ)
+		}
+	}
+
+	// Mask emails in message for response
+	for i := range entries {
+		entries[i].Message = maskEmails(entries[i].Message)
 	}
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
-		"logs": logLines,
+		"logs":       entries,
+		"nextCursor": nextCursor,
 	})
 }

@@ -84,6 +84,11 @@ ALERT_RULES_FILE=alert-rules.json
 CHECK_INTERVAL=60
 LOG_DIR=logs
 
+# Elasticsearch (optional, for log shipping; client v9.3.0)
+ES_ENABLED=false
+ES_ADDRESSES=http://localhost:9200
+ES_INDEX=crypto-alert-logs
+
 # API Server (optional)
 API_PORT=8181
 ```

@@ -24,8 +24,13 @@ func main() {
 		log.Fatalf("Failed to load config: %v", err)
 	}
 
-	// Initialize logger with date-based file rotation
-	if err := logger.InitLogger(cfg.LogDir); err != nil {
+	// Initialize logger with date-based file rotation and optional Elasticsearch
+	esConfig := &logger.ESConfig{
+		Enabled:   cfg.ESEnabled,
+		Addresses: cfg.ESAddresses,
+		Index:     cfg.ESIndex,
+	}
+	if err := logger.InitLogger(cfg.LogDir, esConfig); err != nil {
 		log.Fatalf("Failed to initialize logger: %v", err)
 	}
 	defer logger.GetLogger().Close()

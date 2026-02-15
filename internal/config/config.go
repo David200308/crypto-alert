@@ -22,8 +22,10 @@ type Config struct {
 	ResendFromEmail string
 
 	// Alert Configuration
-	CheckInterval  int    // in seconds
-	AlertRulesFile string // Path to JSON file containing alert rules
+	CheckInterval    int    // in seconds
+	AlertRulesFile   string // Path to JSON file containing alert rules (when source=file)
+	AlertRulesSource string // "file" or "mysql"
+	MySQLDSN         string // MySQL DSN for web3 database (when source=mysql)
 
 	// Logging Configuration
 	LogDir string // Directory for log files (default: "logs")
@@ -40,16 +42,18 @@ func LoadConfig() (*Config, error) {
 	_ = godotenv.Load()
 
 	config := &Config{
-		PythAPIURL:      getEnv("PYTH_API_URL", "https://hermes.pyth.network"),
-		PythAPIKey:      getEnv("PYTH_API_KEY", ""),
-		ResendAPIKey:    getEnv("RESEND_API_KEY", ""),
-		ResendFromEmail: getEnv("RESEND_FROM_EMAIL", ""),
-		CheckInterval:   60, // Default 60 seconds
-		AlertRulesFile:  getEnv("ALERT_RULES_FILE", "alert-rules.json"),
-		LogDir:          getEnv("LOG_DIR", "logs"), // Default log directory
-		ESEnabled:       getEnvBool("ES_ENABLED", true),
-		ESAddresses:     getEnvSlice("ES_ADDRESSES", []string{"http://localhost:9200"}),
-		ESIndex:         getEnv("ES_INDEX", "crypto-alert-logs"),
+		PythAPIURL:       getEnv("PYTH_API_URL", "https://hermes.pyth.network"),
+		PythAPIKey:       getEnv("PYTH_API_KEY", ""),
+		ResendAPIKey:     getEnv("RESEND_API_KEY", ""),
+		ResendFromEmail:  getEnv("RESEND_FROM_EMAIL", ""),
+		CheckInterval:    60, // Default 60 seconds
+		AlertRulesFile:   getEnv("ALERT_RULES_FILE", "alert-rules.json"),
+		AlertRulesSource: getEnv("ALERT_RULES_SOURCE", "mysql"),
+		MySQLDSN:         getEnv("MYSQL_DSN", ""),
+		LogDir:           getEnv("LOG_DIR", "logs"), // Default log directory
+		ESEnabled:        getEnvBool("ES_ENABLED", true),
+		ESAddresses:      getEnvSlice("ES_ADDRESSES", []string{"http://localhost:9200"}),
+		ESIndex:          getEnv("ES_INDEX", "crypto-alert-logs"),
 	}
 
 	return config, nil
@@ -146,7 +150,7 @@ func LoadAlertRules(filePath string) ([]*core.AlertRule, []*core.DeFiAlertRule, 
 		// Try parsing as DeFi rule first (check for protocol field)
 		if err := json.Unmarshal(rawRule, &defiRule); err == nil && defiRule.Protocol != "" {
 			// It's a DeFi rule
-			rule, err := parseDeFiRule(defiRule)
+			rule, err := ParseDeFiRule(defiRule)
 			if err != nil {
 				return nil, nil, fmt.Errorf("failed to parse DeFi rule at index %d: %w", i, err)
 			}
@@ -157,7 +161,7 @@ func LoadAlertRules(filePath string) ([]*core.AlertRule, []*core.DeFiAlertRule, 
 		// Try parsing as price rule
 		if err := json.Unmarshal(rawRule, &priceRule); err == nil && priceRule.Symbol != "" {
 			// It's a price rule
-			rule, err := parsePriceRule(priceRule)
+			rule, err := ParsePriceRule(priceRule)
 			if err != nil {
 				return nil, nil, fmt.Errorf("failed to parse price rule at index %d: %w", i, err)
 			}
@@ -171,8 +175,8 @@ func LoadAlertRules(filePath string) ([]*core.AlertRule, []*core.DeFiAlertRule, 
 	return priceRules, defiRules, nil
 }
 
-// parsePriceRule converts AlertRuleConfig to core.AlertRule
-func parsePriceRule(rc AlertRuleConfig) (*core.AlertRule, error) {
+// ParsePriceRule converts AlertRuleConfig to core.AlertRule (exported for MySQL/store use).
+func ParsePriceRule(rc AlertRuleConfig) (*core.AlertRule, error) {
 	// Validate direction
 	var direction core.Direction
 	switch rc.Direction {
@@ -246,8 +250,8 @@ func parsePriceRule(rc AlertRuleConfig) (*core.AlertRule, error) {
 	}, nil
 }
 
-// parseDeFiRule converts DeFiAlertRuleConfig to core.DeFiAlertRule
-func parseDeFiRule(rc DeFiAlertRuleConfig) (*core.DeFiAlertRule, error) {
+// ParseDeFiRule converts DeFiAlertRuleConfig to core.DeFiAlertRule (exported for MySQL/store use).
+func ParseDeFiRule(rc DeFiAlertRuleConfig) (*core.DeFiAlertRule, error) {
 	// Validate direction
 	var direction core.Direction
 	switch rc.Direction {

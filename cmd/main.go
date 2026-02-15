@@ -9,6 +9,7 @@ import (
 	"syscall"
 	"time"
 
+	"crypto-alert/internal/store"
 	"crypto-alert/internal/config"
 	"crypto-alert/internal/core"
 	"crypto-alert/internal/defi"
@@ -49,9 +50,16 @@ func main() {
 
 	emailSender := message.NewResendEmailSender(cfg.ResendAPIKey, cfg.ResendFromEmail)
 
-	// Load alert rules from JSON config file
-	if err := loadAlertRules(decisionEngine, cfg.AlertRulesFile); err != nil {
-		log.Fatalf("Failed to load alert rules: %v", err)
+	// Load alert rules from file or MySQL
+	switch cfg.AlertRulesSource {
+	case "mysql":
+		if err := loadAlertRulesFromMySQL(decisionEngine, cfg.MySQLDSN); err != nil {
+			log.Fatalf("Failed to load alert rules from MySQL: %v", err)
+		}
+	default:
+		if err := loadAlertRules(decisionEngine, cfg.AlertRulesFile); err != nil {
+			log.Fatalf("Failed to load alert rules: %v", err)
+		}
 	}
 
 	// Create context for graceful shutdown
@@ -265,22 +273,29 @@ func loadAlertRules(engine *core.DecisionEngine, filePath string) error {
 	if err != nil {
 		return fmt.Errorf("failed to load alert rules: %w", err)
 	}
+	return addAlertRulesToEngine(engine, priceRules, defiRules, "file "+filePath)
+}
 
-	// Add all price rules to the decision engine
+// loadAlertRulesFromMySQL loads alert rules from MySQL (web3.alert_rule_token_config, web3.alert_rule_defi_config)
+func loadAlertRulesFromMySQL(engine *core.DecisionEngine, dsn string) error {
+	priceRules, defiRules, err := store.LoadAlertRulesFromMySQL(dsn)
+	if err != nil {
+		return err
+	}
+	return addAlertRulesToEngine(engine, priceRules, defiRules, "MySQL")
+}
+
+func addAlertRulesToEngine(engine *core.DecisionEngine, priceRules []*core.AlertRule, defiRules []*core.DeFiAlertRule, source string) error {
 	for _, rule := range priceRules {
 		engine.AddRule(rule)
 	}
-
-	// Add all DeFi rules to the decision engine
 	for _, rule := range defiRules {
 		engine.AddDeFiRule(rule)
 	}
-
 	totalRules := len(priceRules) + len(defiRules)
-	log.Printf("✅ Loaded %d price rule(s) and %d DeFi rule(s) from %s", len(priceRules), len(defiRules), filePath)
+	log.Printf("✅ Loaded %d price rule(s) and %d DeFi rule(s) from %s", len(priceRules), len(defiRules), source)
 	if totalRules == 0 {
-		return fmt.Errorf("no alert rules found in %s", filePath)
+		return fmt.Errorf("no alert rules found in %s", source)
 	}
-
 	return nil
 }

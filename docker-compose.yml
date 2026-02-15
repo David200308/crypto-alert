@@ -1,4 +1,27 @@
 services:
+  mysql:
+    image: mysql:8.0
+    container_name: crypto-alert-mysql
+    networks:
+      - crypto-alert-service-network
+    ports:
+      - "3306:3306"
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-rootpassword}
+      MYSQL_DATABASE: web3
+      MYSQL_USER: ${MYSQL_USER:-cryptoalert}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-cryptoalert}
+    volumes:
+      - mysql-data:/var/lib/mysql
+      - ./sql/alert_rules_schema.sql:/docker-entrypoint-initdb.d/01_alert_rules_schema.sql:ro
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p${MYSQL_ROOT_PASSWORD:-rootpassword}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    restart: unless-stopped
+
   es01:
     image: docker.elastic.co/elasticsearch/elasticsearch:9.3.0
     container_name: es01
@@ -61,12 +84,16 @@ services:
       ES_ADDRESSES: http://es01:9200
       ES_INDEX: crypto-alert-logs
       ALERT_RULES_FILE: /app/alert-rules.json
+      ALERT_RULES_SOURCE: ${ALERT_RULES_SOURCE:-file}
+      MYSQL_DSN: ${MYSQL_DSN:-cryptoalert:cryptoalert@tcp(mysql:3306)/web3?parseTime=true}
     env_file:
       - .env
     volumes:
       - log-data:/app/logs
       - ./alert-rules.json:/app/alert-rules.json:ro
     depends_on:
+      mysql:
+        condition: service_healthy
       es01:
         condition: service_healthy
     restart: unless-stopped
@@ -92,3 +119,4 @@ networks:
 
 volumes:
   log-data:
+  mysql-data:

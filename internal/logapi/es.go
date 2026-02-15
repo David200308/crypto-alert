@@ -141,7 +141,7 @@ func (c *ESClient) GetLogsForDate(ctx context.Context, dateStr, after, searchQ s
 	}
 
 	body := map[string]interface{}{
-		"size":     10000,
+		"size":    10000,
 		"sort":    []map[string]interface{}{{"@timestamp": map[string]string{"order": "asc"}}},
 		"_source": []string{"message", "@timestamp"},
 		"query":   query,

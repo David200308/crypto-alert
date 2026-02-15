@@ -3,20 +3,92 @@ services:
     image: docker.elastic.co/elasticsearch/elasticsearch:9.3.0
     container_name: es01
     networks:
-      - esnet
+      - crypto-alert-service-network
     ports:
       - "0.0.0.0:9200:9200"
       - "0.0.0.0:9300:9300"
     environment:
       - discovery.type=single-node
       - xpack.security.enabled=false
+    healthcheck:
+      test: ["CMD-SHELL", "curl -s http://localhost:9200/_cluster/health | grep -q '\"status\":\"green\"\\|\"status\":\"yellow\"' || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
     deploy:
       resources:
         limits:
           memory: 1GB
     restart: unless-stopped
 
+  log-api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: crypto-alert:latest
+    container_name: log-api
+    command: ["./log-api"]
+    networks:
+      - crypto-alert-service-network
+    ports:
+      - "8181:8181"
+    environment:
+      API_PORT: "8181"
+      LOG_DIR: /app/logs
+      ES_ENABLED: "true"
+      ES_ADDRESSES: http://es01:9200
+      ES_INDEX: crypto-alert-logs
+    volumes:
+      - log-data:/app/logs
+    depends_on:
+      es01:
+        condition: service_healthy
+    restart: unless-stopped
+
+  crypto-alert:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: crypto-alert:latest
+    container_name: crypto-alert
+    command: ["./crypto-alert"]
+    networks:
+      - crypto-alert-service-network
+    environment:
+      LOG_DIR: /app/logs
+      ES_ENABLED: "true"
+      ES_ADDRESSES: http://es01:9200
+      ES_INDEX: crypto-alert-logs
+      ALERT_RULES_FILE: /app/alert-rules.json
+    env_file:
+      - .env
+    volumes:
+      - log-data:/app/logs
+      - ./alert-rules.json:/app/alert-rules.json:ro
+    depends_on:
+      es01:
+        condition: service_healthy
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: crypto-alert-frontend
+    networks:
+      - crypto-alert-service-network
+    ports:
+      - "3030:3030"
+    environment:
+      BACKEND_URL: http://log-api:8181
+    depends_on:
+      - log-api
+    restart: unless-stopped
+
 networks:
-  esnet:
+  crypto-alert-service-network:
     driver: bridge
-    name: esnet
+
+volumes:
+  log-data:

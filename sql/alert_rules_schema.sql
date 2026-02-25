@@ -27,3 +27,19 @@ CREATE TABLE IF NOT EXISTS alert_rule_defi_config (
   frequency        JSON,
   recipient_email  VARCHAR(255) NOT NULL
 );
+
+-- Prediction market alert rules (e.g., Polymarket)
+-- params JSON fields: negRisk, question_id, question,
+--                     condition_id, outcome (YES/NO), token_id
+-- field: MIDPOINT  (threshold is compared against the CLOB midpoint price)
+CREATE TABLE IF NOT EXISTS alert_rule_predict_market_config (
+  id               BIGINT AUTO_INCREMENT PRIMARY KEY,
+  predict_market   VARCHAR(64) NOT NULL,
+  params           JSON,
+  field            VARCHAR(64) NOT NULL,
+  threshold        DOUBLE NOT NULL,
+  direction        VARCHAR(8) NOT NULL,
+  enabled          BOOLEAN NOT NULL DEFAULT true,
+  frequency        JSON,
+  recipient_email  VARCHAR(255) NOT NULL
+);

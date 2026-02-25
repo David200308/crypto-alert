@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"time"
 
-	"crypto-alert/internal/price"
+	"crypto-alert/internal/data/price"
 )
 
 // Direction indicates the comparison operator for price threshold
@@ -92,17 +92,49 @@ type DeFiAlertDecision struct {
 	Message     string
 }
 
+// PredictMarketAlertRule defines a prediction market alert rule.
+// Threshold comparison is performed against the midpoint price.
+type PredictMarketAlertRule struct {
+	PredictMarket  string     // e.g., "polymarket"
+	TokenID        string     // CLOB token ID to monitor
+	Field          string     // "MIDPOINT"
+	Threshold      float64
+	Direction      Direction
+	Enabled        bool
+	RecipientEmail string
+	LastTriggered  *time.Time
+	Frequency      *Frequency
+	// Display context (populated from params)
+	NegRisk     bool
+	QuestionID  string
+	Question    string
+	ConditionID string
+	Outcome     string // "YES" or "NO"
+}
+
+// PredictMarketAlertDecision represents the result of evaluating a prediction market alert rule.
+type PredictMarketAlertDecision struct {
+	ShouldAlert      bool
+	Rule             *PredictMarketAlertRule
+	CurrentMidpoint  float64
+	CurrentBuyPrice  float64
+	CurrentSellPrice float64
+	Message          string
+}
+
 // DecisionEngine handles price comparison and alert decisions
 type DecisionEngine struct {
-	rules      []*AlertRule
-	defiRules  []*DeFiAlertRule
+	rules               []*AlertRule
+	defiRules           []*DeFiAlertRule
+	predictMarketRules  []*PredictMarketAlertRule
 }
 
 // NewDecisionEngine creates a new decision engine
 func NewDecisionEngine() *DecisionEngine {
 	return &DecisionEngine{
-		rules:     make([]*AlertRule, 0),
-		defiRules: make([]*DeFiAlertRule, 0),
+		rules:              make([]*AlertRule, 0),
+		defiRules:          make([]*DeFiAlertRule, 0),
+		predictMarketRules: make([]*PredictMarketAlertRule, 0),
 	}
 }
 
@@ -134,6 +166,16 @@ func (e *DecisionEngine) GetRules() []*AlertRule {
 // GetDeFiRules returns all DeFi alert rules
 func (e *DecisionEngine) GetDeFiRules() []*DeFiAlertRule {
 	return e.defiRules
+}
+
+// AddPredictMarketRule adds a prediction market alert rule to the engine
+func (e *DecisionEngine) AddPredictMarketRule(rule *PredictMarketAlertRule) {
+	e.predictMarketRules = append(e.predictMarketRules, rule)
+}
+
+// GetPredictMarketRules returns all prediction market alert rules
+func (e *DecisionEngine) GetPredictMarketRules() []*PredictMarketAlertRule {
+	return e.predictMarketRules
 }
 
 // Evaluate checks if a price should trigger an alert based on rules
@@ -272,6 +314,116 @@ func (e *DecisionEngine) EvaluateAll(prices map[string]*price.PriceData) []*Aler
 	}
 
 	return allDecisions
+}
+
+// EvaluatePredictMarket checks if a prediction market midpoint should trigger an alert.
+// buyPrice and sellPrice are passed through to the decision for inclusion in alert emails.
+func (e *DecisionEngine) EvaluatePredictMarket(tokenID string, midpoint, buyPrice, sellPrice float64) []*PredictMarketAlertDecision {
+	decisions := make([]*PredictMarketAlertDecision, 0)
+
+	for _, rule := range e.predictMarketRules {
+		if !rule.Enabled {
+			continue
+		}
+		if rule.TokenID != tokenID {
+			continue
+		}
+
+		shouldAlert := false
+		message := ""
+
+		switch rule.Direction {
+		case DirectionGreaterThanOrEqual:
+			if midpoint >= rule.Threshold {
+				shouldAlert = true
+				message = fmt.Sprintf(
+					"🚨 Alert: Polymarket token %s midpoint is %.4f, which is >= threshold of %g",
+					tokenID, midpoint, rule.Threshold,
+				)
+			}
+		case DirectionGreaterThan:
+			if midpoint > rule.Threshold {
+				shouldAlert = true
+				message = fmt.Sprintf(
+					"🚨 Alert: Polymarket token %s midpoint is %.4f, which is > threshold of %g",
+					tokenID, midpoint, rule.Threshold,
+				)
+			}
+		case DirectionEqual:
+			epsilon := 0.0001
+			if midpoint >= rule.Threshold-epsilon && midpoint <= rule.Threshold+epsilon {
+				shouldAlert = true
+				message = fmt.Sprintf(
+					"🚨 Alert: Polymarket token %s midpoint is %.4f, which equals threshold of %g",
+					tokenID, midpoint, rule.Threshold,
+				)
+			}
+		case DirectionLessThanOrEqual:
+			if midpoint <= rule.Threshold {
+				shouldAlert = true
+				message = fmt.Sprintf(
+					"🚨 Alert: Polymarket token %s midpoint is %.4f, which is <= threshold of %g",
+					tokenID, midpoint, rule.Threshold,
+				)
+			}
+		case DirectionLessThan:
+			if midpoint < rule.Threshold {
+				shouldAlert = true
+				message = fmt.Sprintf(
+					"🚨 Alert: Polymarket token %s midpoint is %.4f, which is < threshold of %g",
+					tokenID, midpoint, rule.Threshold,
+				)
+			}
+		}
+
+		if shouldAlert {
+			if rule.Frequency != nil {
+				switch rule.Frequency.Unit {
+				case FrequencyUnitOnce:
+					if rule.LastTriggered != nil {
+						rule.Enabled = false
+						continue
+					}
+				case FrequencyUnitNever:
+					continue
+				case FrequencyUnitDay:
+					if rule.LastTriggered != nil {
+						requiredDuration := time.Duration(rule.Frequency.Number) * 24 * time.Hour
+						if time.Since(*rule.LastTriggered) < requiredDuration {
+							continue
+						}
+					}
+				case FrequencyUnitHour:
+					if rule.LastTriggered != nil {
+						requiredDuration := time.Duration(rule.Frequency.Number) * time.Hour
+						if time.Since(*rule.LastTriggered) < requiredDuration {
+							continue
+						}
+					}
+				}
+			} else {
+				if rule.LastTriggered != nil {
+					if time.Since(*rule.LastTriggered) < time.Hour {
+						continue
+					}
+				}
+			}
+
+			decisions = append(decisions, &PredictMarketAlertDecision{
+				ShouldAlert:      true,
+				Rule:             rule,
+				CurrentMidpoint:  midpoint,
+				CurrentBuyPrice:  buyPrice,
+				CurrentSellPrice: sellPrice,
+				Message:          message,
+			})
+
+			now := time.Now()
+			rule.LastTriggered = &now
+		}
+	}
+
+	return decisions
 }
 
 // EvaluateDeFi checks if a DeFi value should trigger an alert based on rules

@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"crypto-alert/internal/price"
+	"crypto-alert/internal/data/price"
 )
 
 func TestDecisionEngine_Evaluate(t *testing.T) {

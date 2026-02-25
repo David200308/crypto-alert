@@ -12,8 +12,9 @@ import (
 )
 
 const (
-	tokenTable = "alert_rule_token_config"
-	defiTable  = "alert_rule_defi_config"
+	tokenTable         = "alert_rule_token_config"
+	defiTable          = "alert_rule_defi_config"
+	predictMarketTable = "alert_rule_predict_market_config"
 )
 
 // LoadAlertRulesFromMySQL loads token and DeFi alert rules from the web3 database.
@@ -45,6 +46,78 @@ func LoadAlertRulesFromMySQL(dsn string) ([]*core.AlertRule, []*core.DeFiAlertRu
 	}
 
 	return priceRules, defiRules, nil
+}
+
+// LoadPredictMarketRulesFromMySQL loads prediction market alert rules from the web3 database.
+func LoadPredictMarketRulesFromMySQL(dsn string) ([]*core.PredictMarketAlertRule, error) {
+	if dsn == "" {
+		return nil, fmt.Errorf("MySQL DSN is required when ALERT_RULES_SOURCE=mysql")
+	}
+
+	db, err := sql.Open("mysql", dsn)
+	if err != nil {
+		return nil, fmt.Errorf("open mysql: %w", err)
+	}
+	defer db.Close()
+
+	if err := db.Ping(); err != nil {
+		return nil, fmt.Errorf("mysql ping: %w", err)
+	}
+
+	return loadPredictMarketRules(db)
+}
+
+func loadPredictMarketRules(db *sql.DB) ([]*core.PredictMarketAlertRule, error) {
+	query := `SELECT id, predict_market, params, field, threshold, direction, enabled, frequency, recipient_email FROM ` + predictMarketTable
+	rows, err := db.Query(query)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var rules []*core.PredictMarketAlertRule
+	for rows.Next() {
+		var id int64
+		var predictMarket, field, direction, recipientEmail string
+		var threshold float64
+		var enabled bool
+		var paramsJSON, frequencyJSON []byte
+
+		if err := rows.Scan(&id, &predictMarket, &paramsJSON, &field, &threshold, &direction, &enabled, &frequencyJSON, &recipientEmail); err != nil {
+			return nil, err
+		}
+
+		var params config.PredictMarketAlertRuleParams
+		if len(paramsJSON) > 0 {
+			if err := json.Unmarshal(paramsJSON, &params); err != nil {
+				return nil, fmt.Errorf("predict market rule id %d: invalid params JSON: %w", id, err)
+			}
+		}
+
+		rc := config.PredictMarketAlertRuleConfig{
+			PredictMarket:  predictMarket,
+			Params:         params,
+			Field:          field,
+			Threshold:      threshold,
+			Direction:      direction,
+			Enabled:        enabled,
+			RecipientEmail: recipientEmail,
+		}
+		if len(frequencyJSON) > 0 {
+			var freq config.FrequencyConfig
+			if err := json.Unmarshal(frequencyJSON, &freq); err != nil {
+				return nil, fmt.Errorf("predict market rule id %d: invalid frequency JSON: %w", id, err)
+			}
+			rc.Frequency = &freq
+		}
+
+		rule, err := config.ParsePredictMarketRule(rc)
+		if err != nil {
+			return nil, fmt.Errorf("predict market rule id %d: %w", id, err)
+		}
+		rules = append(rules, rule)
+	}
+	return rules, rows.Err()
 }
 
 func loadTokenRules(db *sql.DB) ([]*core.AlertRule, error) {

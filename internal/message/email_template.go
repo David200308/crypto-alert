@@ -591,6 +591,196 @@ func FormatDeFiAlertHTML(protocol, version, field, chainName string, value, thre
 	return buf.String()
 }
 
+// FormatPredictMarketAlertEmail formats subject, plain-text body, and HTML body for a prediction market alert.
+func FormatPredictMarketAlertEmail(decision *core.PredictMarketAlertDecision) (subject, textBody, htmlBody string) {
+	if decision.Rule == nil {
+		return "", "", ""
+	}
+	r := decision.Rule
+	direction := string(r.Direction)
+	timestamp := time.Now()
+
+	// Subject
+	subject = fmt.Sprintf("🚨 Prediction Market Alert: %s midpoint %s %g",
+		r.PredictMarket, direction, r.Threshold)
+
+	// Direction text
+	var directionText string
+	switch direction {
+	case ">=":
+		directionText = "greater than or equal to"
+	case ">":
+		directionText = "greater than"
+	case "=":
+		directionText = "equal to"
+	case "<=":
+		directionText = "less than or equal to"
+	case "<":
+		directionText = "less than"
+	default:
+		directionText = direction
+	}
+
+	// Plain-text body
+	textBody = fmt.Sprintf(`Prediction Market Alert Triggered!
+
+Platform: %s
+Question: %s
+Outcome: %s
+
+Midpoint Price: %.4f
+Buy Price:      %.4f
+Sell Price:     %.4f
+Threshold:      %g
+Outcome Met:    Midpoint is %s threshold
+Timestamp: %s
+
+This is an automated alert from your prediction market monitoring system.
+`,
+		r.PredictMarket,
+		r.Question,
+		r.Outcome,
+		decision.CurrentMidpoint,
+		decision.CurrentBuyPrice,
+		decision.CurrentSellPrice,
+		r.Threshold,
+		directionText,
+		timestamp.Format(time.RFC3339),
+	)
+
+	// Direction emoji
+	var directionEmoji string
+	switch direction {
+	case ">=", ">":
+		directionEmoji = "📈"
+	case "<=", "<":
+		directionEmoji = "📉"
+	case "=":
+		directionEmoji = "⚖️"
+	default:
+		directionEmoji = "⚠️"
+	}
+
+	var midpointColor string
+	if decision.CurrentMidpoint >= r.Threshold {
+		midpointColor = "#10b981"
+	} else {
+		midpointColor = "#ef4444"
+	}
+
+	htmlTemplate := `
+<!DOCTYPE html>
+<html>
+<head>
+	<meta charset="UTF-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1.0">
+	<title>Prediction Market Alert</title>
+</head>
+<body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px;">
+	<div style="background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%); padding: 30px; border-radius: 10px 10px 0 0; text-align: center;">
+		<h1 style="color: white; margin: 0; font-size: 28px;">🚨 Prediction Market Alert</h1>
+	</div>
+	<div style="background: #f9fafb; padding: 30px; border-radius: 0 0 10px 10px; border: 1px solid #e5e7eb;">
+		<div style="background: white; padding: 25px; border-radius: 8px; margin-bottom: 20px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
+			<h2 style="margin-top: 0; color: #1f2937; font-size: 20px;">{{.PredictMarket}} Alert Triggered</h2>
+			{{if .Question}}<p style="color: #4b5563; font-style: italic; margin-top: 0;">{{.Question}}</p>{{end}}
+
+			<div style="display: flex; align-items: center; margin: 20px 0;">
+				<span style="font-size: 48px; margin-right: 15px;">{{.DirectionEmoji}}</span>
+				<div>
+					<div style="font-size: 14px; color: #6b7280; text-transform: uppercase; letter-spacing: 1px;">Midpoint Price</div>
+					<div style="font-size: 32px; font-weight: bold; color: {{.MidpointColor}};">{{.Midpoint}}</div>
+				</div>
+			</div>
+
+			<div style="border-top: 1px solid #e5e7eb; padding-top: 20px; margin-top: 20px;">
+				<table style="width: 100%%; border-collapse: collapse;">
+					<tr>
+						<td style="padding: 10px 0; color: #6b7280; font-weight: 500;">Platform:</td>
+						<td style="padding: 10px 0; text-align: right; font-weight: 600;">{{.PredictMarket}}</td>
+					</tr>
+					{{if .Outcome}}<tr>
+						<td style="padding: 10px 0; color: #6b7280; font-weight: 500;">Outcome:</td>
+						<td style="padding: 10px 0; text-align: right; font-weight: 600;">{{.Outcome}}</td>
+					</tr>{{end}}
+					<tr>
+						<td style="padding: 10px 0; color: #6b7280; font-weight: 500;">Midpoint:</td>
+						<td style="padding: 10px 0; text-align: right; font-weight: 600; color: {{.MidpointColor}};">{{.Midpoint}}</td>
+					</tr>
+					<tr>
+						<td style="padding: 10px 0; color: #6b7280; font-weight: 500;">Buy Price:</td>
+						<td style="padding: 10px 0; text-align: right; font-weight: 600;">{{.BuyPrice}}</td>
+					</tr>
+					<tr>
+						<td style="padding: 10px 0; color: #6b7280; font-weight: 500;">Sell Price:</td>
+						<td style="padding: 10px 0; text-align: right; font-weight: 600;">{{.SellPrice}}</td>
+					</tr>
+					<tr>
+						<td style="padding: 10px 0; color: #6b7280; font-weight: 500;">Threshold:</td>
+						<td style="padding: 10px 0; text-align: right; font-weight: 600;">{{.Threshold}}</td>
+					</tr>
+					<tr>
+						<td style="padding: 10px 0; color: #6b7280; font-weight: 500;">Outcome Met:</td>
+						<td style="padding: 10px 0; text-align: right; font-weight: 600;">Midpoint is {{.DirectionText}} threshold</td>
+					</tr>
+					<tr>
+						<td style="padding: 10px 0; color: #6b7280; font-weight: 500;">Timestamp:</td>
+						<td style="padding: 10px 0; text-align: right; font-weight: 600;">{{.Timestamp}}</td>
+					</tr>
+				</table>
+			</div>
+		</div>
+		<div style="text-align: center; color: #6b7280; font-size: 12px; margin-top: 20px;">
+			<p style="margin: 0;">This is an automated alert from your prediction market monitoring system.</p>
+			<p style="margin: 5px 0 0 0;">Powered by Polymarket CLOB API</p>
+		</div>
+	</div>
+</body>
+</html>
+`
+
+	data := struct {
+		PredictMarket  string
+		Question       string
+		Outcome        string
+		Midpoint       string
+		BuyPrice       string
+		SellPrice      string
+		Threshold      string
+		DirectionText  string
+		DirectionEmoji string
+		MidpointColor  string
+		Timestamp      string
+	}{
+		PredictMarket:  r.PredictMarket,
+		Question:       r.Question,
+		Outcome:        r.Outcome,
+		Midpoint:       fmt.Sprintf("%.4f", decision.CurrentMidpoint),
+		BuyPrice:       fmt.Sprintf("%.4f", decision.CurrentBuyPrice),
+		SellPrice:      fmt.Sprintf("%.4f", decision.CurrentSellPrice),
+		Threshold:      fmt.Sprintf("%g", r.Threshold),
+		DirectionText:  directionText,
+		DirectionEmoji: directionEmoji,
+		MidpointColor:  midpointColor,
+		Timestamp:      timestamp.Format(time.RFC3339),
+	}
+
+	tmpl, err := template.New("predict-market-email").Parse(htmlTemplate)
+	if err != nil {
+		htmlBody = fmt.Sprintf("<html><body><h1>🚨 Prediction Market Alert</h1><p>%s</p></body></html>", textBody)
+		return subject, textBody, htmlBody
+	}
+
+	var buf strings.Builder
+	if err := tmpl.Execute(&buf, data); err != nil {
+		htmlBody = fmt.Sprintf("<html><body><h1>🚨 Prediction Market Alert</h1><p>%s</p></body></html>", textBody)
+		return subject, textBody, htmlBody
+	}
+
+	htmlBody = buf.String()
+	return subject, textBody, htmlBody
+}
+
 // FormatDeFiAlertEmail formats both subject and body for a DeFi alert decision
 func FormatDeFiAlertEmail(decision *core.DeFiAlertDecision) (subject, textBody, htmlBody string) {
 	if decision.Rule == nil {

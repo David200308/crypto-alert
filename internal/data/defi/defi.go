@@ -9,9 +9,9 @@ import (
 
 	"github.com/ethereum/go-ethereum/common"
 
-	"crypto-alert/internal/defi/aave"
-	"crypto-alert/internal/defi/kamino"
-	"crypto-alert/internal/defi/morpho"
+	"crypto-alert/internal/data/defi/aave"
+	"crypto-alert/internal/data/defi/kamino"
+	"crypto-alert/internal/data/defi/morpho"
 )
 
 // ClientManager manages DeFi protocol clients

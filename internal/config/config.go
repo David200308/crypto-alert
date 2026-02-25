@@ -1,7 +1,6 @@
 package config
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
 	"strings"
@@ -22,10 +21,8 @@ type Config struct {
 	ResendFromEmail string
 
 	// Alert Configuration
-	CheckInterval    int    // in seconds
-	AlertRulesFile   string // Path to JSON file containing alert rules (when source=file)
-	AlertRulesSource string // "file" or "mysql"
-	MySQLDSN         string // MySQL DSN for web3 database (when source=mysql)
+	CheckInterval int    // in seconds
+	MySQLDSN      string // MySQL DSN for web3 database
 
 	// Logging Configuration
 	LogDir string // Directory for log files (default: "logs")
@@ -46,10 +43,8 @@ func LoadConfig() (*Config, error) {
 		PythAPIKey:       getEnv("PYTH_API_KEY", ""),
 		ResendAPIKey:     getEnv("RESEND_API_KEY", ""),
 		ResendFromEmail:  getEnv("RESEND_FROM_EMAIL", ""),
-		CheckInterval:    60, // Default 60 seconds
-		AlertRulesFile:   getEnv("ALERT_RULES_FILE", "alert-rules.json"),
-		AlertRulesSource: getEnv("ALERT_RULES_SOURCE", "mysql"),
-		MySQLDSN:         getEnv("MYSQL_DSN", ""),
+		CheckInterval: 60, // Default 60 seconds
+		MySQLDSN:      getEnv("MYSQL_DSN", ""),
 		LogDir:           getEnv("LOG_DIR", "logs"), // Default log directory
 		ESEnabled:        getEnvBool("ES_ENABLED", true),
 		ESAddresses:      getEnvSlice("ES_ADDRESSES", []string{"http://localhost:9200"}),
@@ -120,59 +115,95 @@ type DeFiAlertRuleConfig struct {
 	Params         DeFiAlertRuleParams `json:"params"`              // Protocol-specific parameters
 }
 
-// LoadAlertRules loads alert rules from a JSON file (supports both price and DeFi rules)
-func LoadAlertRules(filePath string) ([]*core.AlertRule, []*core.DeFiAlertRule, error) {
-	// Check if file exists
-	if _, err := os.Stat(filePath); os.IsNotExist(err) {
-		return nil, nil, fmt.Errorf("alert rules file not found: %s", filePath)
+// PredictMarketAlertRuleParams holds prediction market-specific parameters stored in the params JSON column.
+type PredictMarketAlertRuleParams struct {
+	NegRisk     bool   `json:"negRisk,omitempty"`
+	QuestionID  string `json:"question_id,omitempty"`
+	Question    string `json:"question,omitempty"`
+	ConditionID string `json:"condition_id,omitempty"`
+	Outcome     string `json:"outcome,omitempty"` // "YES" or "NO"
+	TokenID     string `json:"token_id,omitempty"`
+}
+
+// PredictMarketAlertRuleConfig represents a prediction market alert rule.
+type PredictMarketAlertRuleConfig struct {
+	PredictMarket  string                       `json:"predict_market"`
+	Params         PredictMarketAlertRuleParams `json:"params"`
+	Field          string                       `json:"field"`           // "MIDPOINT"
+	Threshold      float64                      `json:"threshold"`
+	Direction      string                       `json:"direction"`       // ">=", ">", "=", "<=", "<"
+	Enabled        bool                         `json:"enabled"`
+	Frequency      *FrequencyConfig             `json:"frequency,omitempty"`
+	RecipientEmail string                       `json:"recipient_email"`
+}
+
+// ParsePredictMarketRule converts PredictMarketAlertRuleConfig to core.PredictMarketAlertRule.
+func ParsePredictMarketRule(rc PredictMarketAlertRuleConfig) (*core.PredictMarketAlertRule, error) {
+	var direction core.Direction
+	switch rc.Direction {
+	case ">=":
+		direction = core.DirectionGreaterThanOrEqual
+	case ">":
+		direction = core.DirectionGreaterThan
+	case "=":
+		direction = core.DirectionEqual
+	case "<=":
+		direction = core.DirectionLessThanOrEqual
+	case "<":
+		direction = core.DirectionLessThan
+	default:
+		return nil, fmt.Errorf("invalid direction '%s' for predict market rule, must be one of: >=, >, =, <=, <", rc.Direction)
 	}
 
-	// Read file
-	data, err := os.ReadFile(filePath)
-	if err != nil {
-		return nil, nil, fmt.Errorf("failed to read alert rules file: %w", err)
+	if rc.PredictMarket == "" {
+		return nil, fmt.Errorf("predict_market cannot be empty")
+	}
+	if rc.Params.TokenID == "" {
+		return nil, fmt.Errorf("params.token_id cannot be empty for predict market rule")
+	}
+	if rc.Field != "MIDPOINT" {
+		return nil, fmt.Errorf("invalid field '%s' for predict market rule, must be: MIDPOINT", rc.Field)
+	}
+	if rc.Threshold < 0 {
+		return nil, fmt.Errorf("threshold must be non-negative for predict market rule")
+	}
+	if rc.RecipientEmail == "" {
+		return nil, fmt.Errorf("recipient_email is required for predict market rule")
 	}
 
-	// Parse JSON as array of raw JSON objects to determine type
-	var rawRules []json.RawMessage
-	if err := json.Unmarshal(data, &rawRules); err != nil {
-		return nil, nil, fmt.Errorf("failed to parse alert rules JSON: %w", err)
-	}
-
-	priceRules := make([]*core.AlertRule, 0)
-	defiRules := make([]*core.DeFiAlertRule, 0)
-
-	for i, rawRule := range rawRules {
-		// Try to determine if it's a price rule or DeFi rule
-		var priceRule AlertRuleConfig
-		var defiRule DeFiAlertRuleConfig
-
-		// Try parsing as DeFi rule first (check for protocol field)
-		if err := json.Unmarshal(rawRule, &defiRule); err == nil && defiRule.Protocol != "" {
-			// It's a DeFi rule
-			rule, err := ParseDeFiRule(defiRule)
-			if err != nil {
-				return nil, nil, fmt.Errorf("failed to parse DeFi rule at index %d: %w", i, err)
+	var frequency *core.Frequency
+	if rc.Frequency != nil {
+		switch rc.Frequency.Unit {
+		case FrequencyUnitDay, FrequencyUnitHour:
+			if rc.Frequency.Number == nil || *rc.Frequency.Number <= 0 {
+				return nil, fmt.Errorf("frequency.number is required and must be positive for unit %s", rc.Frequency.Unit)
 			}
-			defiRules = append(defiRules, rule)
-			continue
-		}
-
-		// Try parsing as price rule
-		if err := json.Unmarshal(rawRule, &priceRule); err == nil && priceRule.Symbol != "" {
-			// It's a price rule
-			rule, err := ParsePriceRule(priceRule)
-			if err != nil {
-				return nil, nil, fmt.Errorf("failed to parse price rule at index %d: %w", i, err)
+			frequency = &core.Frequency{
+				Number: *rc.Frequency.Number,
+				Unit:   core.FrequencyUnit(rc.Frequency.Unit),
 			}
-			priceRules = append(priceRules, rule)
-			continue
+		case FrequencyUnitOnce:
+			frequency = &core.Frequency{Unit: core.FrequencyUnitOnce}
+		default:
+			return nil, fmt.Errorf("invalid frequency.unit '%s', must be one of: DAY, HOUR, ONCE", rc.Frequency.Unit)
 		}
-
-		return nil, nil, fmt.Errorf("unable to determine rule type at index %d (must be either price rule with 'symbol' or DeFi rule with 'protocol')", i)
 	}
 
-	return priceRules, defiRules, nil
+	return &core.PredictMarketAlertRule{
+		PredictMarket:  rc.PredictMarket,
+		TokenID:        rc.Params.TokenID,
+		Field:          rc.Field,
+		Threshold:      rc.Threshold,
+		Direction:      direction,
+		Enabled:        rc.Enabled,
+		RecipientEmail: rc.RecipientEmail,
+		Frequency:      frequency,
+		NegRisk:        rc.Params.NegRisk,
+		QuestionID:     rc.Params.QuestionID,
+		Question:       rc.Params.Question,
+		ConditionID:    rc.Params.ConditionID,
+		Outcome:        rc.Params.Outcome,
+	}, nil
 }
 
 // ParsePriceRule converts AlertRuleConfig to core.AlertRule (exported for MySQL/store use).

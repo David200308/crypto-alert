@@ -9,13 +9,14 @@ import (
 	"syscall"
 	"time"
 
-	"crypto-alert/internal/store"
 	"crypto-alert/internal/config"
 	"crypto-alert/internal/core"
-	"crypto-alert/internal/defi"
+	"crypto-alert/internal/data/defi"
 	"crypto-alert/internal/logger"
 	"crypto-alert/internal/message"
-	"crypto-alert/internal/price"
+	"crypto-alert/internal/data/prediction/polymarket"
+	"crypto-alert/internal/data/price"
+	"crypto-alert/internal/store"
 )
 
 func main() {
@@ -50,16 +51,9 @@ func main() {
 
 	emailSender := message.NewResendEmailSender(cfg.ResendAPIKey, cfg.ResendFromEmail)
 
-	// Load alert rules from file or MySQL
-	switch cfg.AlertRulesSource {
-	case "mysql":
-		if err := loadAlertRulesFromMySQL(decisionEngine, cfg.MySQLDSN); err != nil {
-			log.Fatalf("Failed to load alert rules from MySQL: %v", err)
-		}
-	default:
-		if err := loadAlertRules(decisionEngine, cfg.AlertRulesFile); err != nil {
-			log.Fatalf("Failed to load alert rules: %v", err)
-		}
+	// Load alert rules from MySQL
+	if err := loadAlertRulesFromMySQL(decisionEngine, cfg.MySQLDSN); err != nil {
+		log.Fatalf("Failed to load alert rules from MySQL: %v", err)
 	}
 
 	// Create context for graceful shutdown
@@ -73,8 +67,14 @@ func main() {
 	// Start the alert monitoring loops
 	go monitorPrices(ctx, pythClient, decisionEngine, emailSender, cfg)
 	go monitorDeFi(ctx, decisionEngine, emailSender, cfg)
+	go monitorPredictMarkets(ctx, decisionEngine, emailSender, cfg)
 
 	log.Println("🚀 Crypto Alert System started")
+
+	// Load prediction market rules from MySQL
+	if err := loadPredictMarketRulesFromMySQL(decisionEngine, cfg.MySQLDSN); err != nil {
+		log.Printf("⚠️  Failed to load prediction market rules from MySQL: %v", err)
+	}
 
 	// Get symbols from alert rules for logging
 	rules := decisionEngine.GetRules()
@@ -92,7 +92,18 @@ func main() {
 	defiRules := decisionEngine.GetDeFiRules()
 	defi.LogDeFiRules(defiRules)
 
-	if len(symbols) == 0 && len(defiRules) == 0 {
+	// Log prediction market rules
+	predictRules := decisionEngine.GetPredictMarketRules()
+	if len(predictRules) > 0 {
+		log.Printf("📊 Monitoring prediction markets: %d rule(s)", len(predictRules))
+		for _, r := range predictRules {
+			if r.Enabled {
+				log.Printf("  - %s token %s (%s): %s %g", r.PredictMarket, r.TokenID, r.Outcome, r.Field, r.Threshold)
+			}
+		}
+	}
+
+	if len(symbols) == 0 && len(defiRules) == 0 && len(predictRules) == 0 {
 		log.Println("⚠️  No enabled alert rules found")
 	}
 	log.Printf("⏱️  Check interval: %d seconds", cfg.CheckInterval)
@@ -267,15 +278,6 @@ func checkAndAlertDeFi(
 	return nil
 }
 
-// loadAlertRules loads alert rules from JSON config file
-func loadAlertRules(engine *core.DecisionEngine, filePath string) error {
-	priceRules, defiRules, err := config.LoadAlertRules(filePath)
-	if err != nil {
-		return fmt.Errorf("failed to load alert rules: %w", err)
-	}
-	return addAlertRulesToEngine(engine, priceRules, defiRules, "file "+filePath)
-}
-
 // loadAlertRulesFromMySQL loads alert rules from MySQL (web3.alert_rule_token_config, web3.alert_rule_defi_config)
 func loadAlertRulesFromMySQL(engine *core.DecisionEngine, dsn string) error {
 	priceRules, defiRules, err := store.LoadAlertRulesFromMySQL(dsn)
@@ -283,6 +285,106 @@ func loadAlertRulesFromMySQL(engine *core.DecisionEngine, dsn string) error {
 		return err
 	}
 	return addAlertRulesToEngine(engine, priceRules, defiRules, "MySQL")
+}
+
+// loadPredictMarketRulesFromMySQL loads prediction market rules from MySQL and adds them to the engine
+func loadPredictMarketRulesFromMySQL(engine *core.DecisionEngine, dsn string) error {
+	rules, err := store.LoadPredictMarketRulesFromMySQL(dsn)
+	if err != nil {
+		return err
+	}
+	for _, rule := range rules {
+		engine.AddPredictMarketRule(rule)
+	}
+	log.Printf("✅ Loaded %d prediction market rule(s) from MySQL", len(rules))
+	return nil
+}
+
+// monitorPredictMarkets continuously monitors prediction market prices and triggers alerts
+func monitorPredictMarkets(
+	ctx context.Context,
+	decisionEngine *core.DecisionEngine,
+	sender message.MessageSender,
+	cfg *config.Config,
+) {
+	ticker := time.NewTicker(time.Duration(cfg.CheckInterval) * time.Second)
+	defer ticker.Stop()
+
+	// Run immediately on startup
+	if err := checkAndAlertPredictMarkets(ctx, decisionEngine, sender); err != nil {
+		log.Printf("Error checking prediction markets: %v", err)
+	}
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			if err := checkAndAlertPredictMarkets(ctx, decisionEngine, sender); err != nil {
+				log.Printf("Error checking prediction markets: %v", err)
+			}
+		}
+	}
+}
+
+// checkAndAlertPredictMarkets fetches Polymarket prices and sends alerts if conditions are met
+func checkAndAlertPredictMarkets(
+	ctx context.Context,
+	decisionEngine *core.DecisionEngine,
+	sender message.MessageSender,
+) error {
+	rules := decisionEngine.GetPredictMarketRules()
+	if len(rules) == 0 {
+		return nil
+	}
+
+	// Collect unique token IDs across all enabled rules
+	tokenIDSet := make(map[string]struct{})
+	for _, rule := range rules {
+		if rule.Enabled {
+			tokenIDSet[rule.TokenID] = struct{}{}
+		}
+	}
+	if len(tokenIDSet) == 0 {
+		return nil
+	}
+
+	tokenIDs := make([]string, 0, len(tokenIDSet))
+	for id := range tokenIDSet {
+		tokenIDs = append(tokenIDs, id)
+	}
+
+	log.Printf("🔍 Checking Polymarket prices for %d token(s)...", len(tokenIDs))
+
+	client := polymarket.NewClient()
+	prices, err := client.GetTokenPrices(ctx, tokenIDs)
+	if err != nil {
+		return fmt.Errorf("failed to fetch Polymarket prices: %w", err)
+	}
+
+	// Evaluate each rule against its token's midpoint price
+	for _, rule := range rules {
+		if !rule.Enabled {
+			continue
+		}
+		tp, ok := prices[rule.TokenID]
+		if !ok {
+			log.Printf("⚠️  No price data for Polymarket token %s", rule.TokenID)
+			continue
+		}
+
+		decisions := decisionEngine.EvaluatePredictMarket(rule.TokenID, tp.Midpoint, tp.BuyPrice, tp.SellPrice)
+		for _, decision := range decisions {
+			if decision.ShouldAlert {
+				log.Printf("🚨 Alert triggered: %s", decision.Message)
+				if err := sender.SendPredictMarketAlert(decision.Rule.RecipientEmail, decision); err != nil {
+					log.Printf("❌ Failed to send predict market alert to %s: %v", decision.Rule.RecipientEmail, err)
+				}
+			}
+		}
+	}
+
+	return nil
 }
 
 func addAlertRulesToEngine(engine *core.DecisionEngine, priceRules []*core.AlertRule, defiRules []*core.DeFiAlertRule, source string) error {

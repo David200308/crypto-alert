@@ -40,3 +40,5 @@ alert-rules.json
 # Log files
 logs/
 *.log
+
+insert_config.sql

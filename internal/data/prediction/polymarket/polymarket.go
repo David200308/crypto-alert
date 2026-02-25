@@ -8,7 +8,6 @@ import (
 	"log"
 	"net/http"
 	"strconv"
-	"strings"
 	"time"
 )
 
@@ -73,39 +72,38 @@ func (c *Client) GetTokenPrices(ctx context.Context, tokenIDs []string) (map[str
 	return result, nil
 }
 
-// getMidpoints calls GET /midpoints?token_ids=<comma-separated> and returns tokenID -> midpoint.
-// Response format: {"<tokenID>": "0.45", ...}
+// getMidpoints calls GET /midpoint?token_id=<id> for each token and returns tokenID -> midpoint.
+// Response format: {"mid": "0.45"}
 func (c *Client) getMidpoints(ctx context.Context, tokenIDs []string) (map[string]float64, error) {
-	url := fmt.Sprintf("%s/midpoints?token_ids=%s", c.baseURL, strings.Join(tokenIDs, ","))
+	result := make(map[string]float64, len(tokenIDs))
+	for _, tokenID := range tokenIDs {
+		url := fmt.Sprintf("%s/midpoint?token_id=%s", c.baseURL, tokenID)
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+		if err != nil {
+			return nil, err
+		}
+		req.Header.Set("Accept", "application/json")
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("Accept", "application/json")
+		resp, err := c.httpClient.Do(req)
+		if err != nil {
+			return nil, err
+		}
+		body, err := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if err != nil {
+			return nil, err
+		}
+		if resp.StatusCode != http.StatusOK {
+			return nil, fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(body))
+		}
 
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, err
-	}
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(body))
-	}
-
-	var raw map[string]string
-	if err := json.Unmarshal(body, &raw); err != nil {
-		return nil, fmt.Errorf("parse midpoints response: %w", err)
-	}
-
-	result := make(map[string]float64, len(raw))
-	for tokenID, priceStr := range raw {
-		price, err := strconv.ParseFloat(priceStr, 64)
+		var raw struct {
+			Mid string `json:"mid"`
+		}
+		if err := json.Unmarshal(body, &raw); err != nil {
+			return nil, fmt.Errorf("parse midpoint response: %w", err)
+		}
+		price, err := strconv.ParseFloat(raw.Mid, 64)
 		if err != nil {
 			log.Printf("⚠️  Polymarket: failed to parse midpoint for token %s: %v", tokenID, err)
 			continue
@@ -115,47 +113,48 @@ func (c *Client) getMidpoints(ctx context.Context, tokenIDs []string) (map[strin
 	return result, nil
 }
 
-// getMarketPrices calls GET /prices with each token ID listed twice (once for BUY, once for SELL)
-// so that both sides are returned in a single request.
-// Response format: {"<tokenID>": {"BUY": 0.45, "SELL": 0.43}, ...}
+// getMarketPrices calls GET /price?token_id=<id>&side=BUY and GET /price?token_id=<id>&side=SELL
+// for each token and returns tokenID -> map[side]price.
+// Response format: {"price": "0.45"}
 func (c *Client) getMarketPrices(ctx context.Context, tokenIDs []string) (map[string]map[string]float64, error) {
-	// Duplicate each token ID so we request both BUY and SELL in one call.
-	doubled := make([]string, 0, len(tokenIDs)*2)
-	sides := make([]string, 0, len(tokenIDs)*2)
-	for _, id := range tokenIDs {
-		doubled = append(doubled, id, id)
-		sides = append(sides, "BUY", "SELL")
-	}
+	result := make(map[string]map[string]float64, len(tokenIDs))
+	for _, tokenID := range tokenIDs {
+		sides := map[string]float64{}
+		for _, side := range []string{"BUY", "SELL"} {
+			url := fmt.Sprintf("%s/price?token_id=%s&side=%s", c.baseURL, tokenID, side)
+			req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+			if err != nil {
+				return nil, err
+			}
+			req.Header.Set("Accept", "application/json")
 
-	url := fmt.Sprintf("%s/prices?token_ids=%s&sides=%s",
-		c.baseURL,
-		strings.Join(doubled, ","),
-		strings.Join(sides, ","),
-	)
+			resp, err := c.httpClient.Do(req)
+			if err != nil {
+				return nil, err
+			}
+			body, err := io.ReadAll(resp.Body)
+			resp.Body.Close()
+			if err != nil {
+				return nil, err
+			}
+			if resp.StatusCode != http.StatusOK {
+				return nil, fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(body))
+			}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-	if err != nil {
-		return nil, err
+			var raw struct {
+				Price string `json:"price"`
+			}
+			if err := json.Unmarshal(body, &raw); err != nil {
+				return nil, fmt.Errorf("parse price response: %w", err)
+			}
+			p, err := strconv.ParseFloat(raw.Price, 64)
+			if err != nil {
+				log.Printf("⚠️  Polymarket: failed to parse %s price for token %s: %v", side, tokenID, err)
+				continue
+			}
+			sides[side] = p
+		}
+		result[tokenID] = sides
 	}
-	req.Header.Set("Accept", "application/json")
-
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, err
-	}
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(body))
-	}
-
-	var raw map[string]map[string]float64
-	if err := json.Unmarshal(body, &raw); err != nil {
-		return nil, fmt.Errorf("parse prices response: %w", err)
-	}
-	return raw, nil
+	return result, nil
 }

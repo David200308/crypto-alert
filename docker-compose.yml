@@ -1,6 +1,6 @@
 services:
   kafka:
-    image: bitnami/kafka:3.9
+    image: bitnami/kafka:latest
     container_name: crypto-alert-kafka
     networks:
       - crypto-alert-service-network

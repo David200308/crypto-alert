@@ -65,8 +65,6 @@ func (c *Client) GetTokenPrices(ctx context.Context, tokenIDs []string) (map[str
 			tp.SellPrice = sides["SELL"]
 		}
 		result[tokenID] = tp
-		log.Printf("📊 Polymarket token %s: midpoint=%.4f buy=%.4f sell=%.4f",
-			tokenID, tp.Midpoint, tp.BuyPrice, tp.SellPrice)
 	}
 
 	return result, nil

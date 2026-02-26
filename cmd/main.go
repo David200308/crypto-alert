@@ -191,10 +191,9 @@ func checkAndAlert(
 	for _, decision := range decisions {
 		if decision.ShouldAlert {
 			log.Printf("🚨 Alert triggered: %s", decision.Message)
-			// Send email to the recipient specified in the alert rule using formatted template
-			// if err := sender.SendAlert(decision.Rule.RecipientEmail, decision); err != nil {
-			// 	log.Printf("❌ Failed to send alert to %s: %v", decision.Rule.RecipientEmail, err)
-			// }
+			if err := sender.SendAlert(decision.Rule.RecipientEmail, decision); err != nil {
+				log.Printf("❌ Failed to send alert to %s: %v", decision.Rule.RecipientEmail, err)
+			}
 		}
 	}
 
@@ -372,6 +371,9 @@ func checkAndAlertPredictMarkets(
 			log.Printf("⚠️  No price data for Polymarket token %s", rule.TokenID)
 			continue
 		}
+
+		log.Printf("💰 [%s] %s - midpoint=%.4f buy=%.4f sell=%.4f",
+			rule.Outcome, rule.Question, tp.Midpoint, tp.BuyPrice, tp.SellPrice)
 
 		decisions := decisionEngine.EvaluatePredictMarket(rule.TokenID, tp.Midpoint, tp.BuyPrice, tp.SellPrice)
 		for _, decision := range decisions {

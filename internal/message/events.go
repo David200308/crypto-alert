@@ -22,14 +22,14 @@ type TokenAlertEvent struct {
 
 // DeFiAlertEvent is the Kafka message payload for a DeFi protocol alert.
 type DeFiAlertEvent struct {
-	RecipientEmail string  `json:"recipient_email"`
+	RecipientEmail string `json:"recipient_email"`
 	// Rule identity
-	Protocol string `json:"protocol"`
-	Category string `json:"category"`
-	Version  string `json:"version"`
-	ChainID  string `json:"chain_id"`
+	Protocol  string `json:"protocol"`
+	Category  string `json:"category"`
+	Version   string `json:"version"`
+	ChainID   string `json:"chain_id"`
 	ChainName string `json:"chain_name"`
-	Field    string  `json:"field"`
+	Field     string `json:"field"`
 	// Threshold
 	Threshold    float64 `json:"threshold"`
 	Direction    string  `json:"direction"`

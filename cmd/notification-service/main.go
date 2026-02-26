@@ -57,7 +57,7 @@ func main() {
 
 // consumeTokenAlerts reads from alerts.token and sends price alert emails.
 func consumeTokenAlerts(ctx context.Context, brokers []string, resend *message.ResendEmailSender) {
-	r := newReader(brokers, message.TopicTokenAlert)
+	r := newReader(brokers, message.TopicTokenAlert, "notification-service-token")
 	defer r.Close()
 
 	for {
@@ -103,7 +103,7 @@ func consumeTokenAlerts(ctx context.Context, brokers []string, resend *message.R
 
 // consumeDeFiAlerts reads from alerts.defi and sends DeFi alert emails.
 func consumeDeFiAlerts(ctx context.Context, brokers []string, resend *message.ResendEmailSender) {
-	r := newReader(brokers, message.TopicDeFiAlert)
+	r := newReader(brokers, message.TopicDeFiAlert, "notification-service-defi")
 	defer r.Close()
 
 	for {
@@ -162,7 +162,7 @@ func consumeDeFiAlerts(ctx context.Context, brokers []string, resend *message.Re
 
 // consumePredictAlerts reads from alerts.predict and sends prediction market alert emails.
 func consumePredictAlerts(ctx context.Context, brokers []string, resend *message.ResendEmailSender) {
-	r := newReader(brokers, message.TopicPredictAlert)
+	r := newReader(brokers, message.TopicPredictAlert, "notification-service-predict")
 	defer r.Close()
 
 	for {
@@ -211,13 +211,14 @@ func consumePredictAlerts(ctx context.Context, brokers []string, resend *message
 	}
 }
 
-func newReader(brokers []string, topic string) *kafka.Reader {
+func newReader(brokers []string, topic, groupID string) *kafka.Reader {
 	return kafka.NewReader(kafka.ReaderConfig{
-		Brokers:  brokers,
-		GroupID:  "notification-service",
-		Topic:    topic,
-		MinBytes: 1,
-		MaxBytes: 1e6,
+		Brokers:     brokers,
+		GroupID:     groupID,
+		Topic:       topic,
+		MinBytes:    1,
+		MaxBytes:    1e6,
+		StartOffset: kafka.FirstOffset,
 	})
 }
 

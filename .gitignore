@@ -42,3 +42,4 @@ logs/
 *.log
 
 insert_config.sql
+deploy.sh

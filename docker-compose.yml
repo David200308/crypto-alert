@@ -1,6 +1,6 @@
 services:
   kafka:
-    image: apache/kafka:latest
+    image: apache/kafka:3.9.2
     container_name: crypto-alert-kafka
     networks:
       - crypto-alert-service-network

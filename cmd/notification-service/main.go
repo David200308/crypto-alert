@@ -59,6 +59,7 @@ func main() {
 func consumeTokenAlerts(ctx context.Context, brokers []string, resend *message.ResendEmailSender) {
 	r := newReader(brokers, message.TopicTokenAlert, "notification-service-token")
 	defer r.Close()
+	log.Printf("🔄 [alerts.token] consumer goroutine started, waiting for messages...")
 
 	for {
 		msg, err := r.FetchMessage(ctx)
@@ -105,6 +106,7 @@ func consumeTokenAlerts(ctx context.Context, brokers []string, resend *message.R
 func consumeDeFiAlerts(ctx context.Context, brokers []string, resend *message.ResendEmailSender) {
 	r := newReader(brokers, message.TopicDeFiAlert, "notification-service-defi")
 	defer r.Close()
+	log.Printf("🔄 [alerts.defi] consumer goroutine started, waiting for messages...")
 
 	for {
 		msg, err := r.FetchMessage(ctx)
@@ -164,6 +166,7 @@ func consumeDeFiAlerts(ctx context.Context, brokers []string, resend *message.Re
 func consumePredictAlerts(ctx context.Context, brokers []string, resend *message.ResendEmailSender) {
 	r := newReader(brokers, message.TopicPredictAlert, "notification-service-predict")
 	defer r.Close()
+	log.Printf("🔄 [alerts.predict] consumer goroutine started, waiting for messages...")
 
 	for {
 		msg, err := r.FetchMessage(ctx)
@@ -213,12 +216,17 @@ func consumePredictAlerts(ctx context.Context, brokers []string, resend *message
 
 func newReader(brokers []string, topic, groupID string) *kafka.Reader {
 	return kafka.NewReader(kafka.ReaderConfig{
-		Brokers:     brokers,
-		GroupID:     groupID,
-		Topic:       topic,
-		MinBytes:    1,
-		MaxBytes:    1e6,
-		StartOffset: kafka.FirstOffset,
+		Brokers:        brokers,
+		GroupID:        groupID,
+		Topic:          topic,
+		MinBytes:       1,
+		MaxBytes:       1e6,
+		StartOffset:    kafka.FirstOffset,
+		SessionTimeout: 30 * time.Second,
+		MaxWait:        10 * time.Second,
+		ErrorLogger: kafka.LoggerFunc(func(msg string, args ...interface{}) {
+			log.Printf("[kafka-go][%s] ERROR: "+msg, append([]interface{}{topic}, args...)...)
+		}),
 	})
 }
 

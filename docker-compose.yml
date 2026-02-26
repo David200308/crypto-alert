@@ -140,6 +140,7 @@ services:
       kafka:
         condition: service_healthy
     restart: unless-stopped
+    stop_grace_period: 5s
 
   frontend:
     build:

@@ -82,13 +82,12 @@ func formatNumberWithCommas(value float64) string {
 
 // EmailTemplateData holds data for email template rendering
 type EmailTemplateData struct {
-	Symbol     string
-	Price      float64
-	Threshold  float64
-	Direction  string
-	Message    string
-	Timestamp  time.Time
-	Confidence float64
+	Symbol    string
+	Price     float64
+	Threshold float64
+	Direction string
+	Message   string
+	Timestamp time.Time
 }
 
 // FormatAlertSubject formats the email subject for an alert
@@ -97,7 +96,7 @@ func FormatAlertSubject(symbol string, price float64, threshold float64, directi
 }
 
 // FormatAlertMessage formats the plain text message for an alert
-func FormatAlertMessage(symbol string, price float64, threshold float64, direction string, timestamp time.Time, confidence float64) string {
+func FormatAlertMessage(symbol string, price float64, threshold float64, direction string, timestamp time.Time) string {
 	var directionText string
 	switch direction {
 	case ">=":
@@ -120,15 +119,14 @@ Symbol: %s
 Current Price: $%g
 Threshold: $%g
 Condition: Price is %s threshold
-Confidence: %g%%
 Timestamp: %s
 
 This is an automated alert from your crypto price monitoring system.
-`, symbol, price, threshold, directionText, confidence*100, timestamp.Format(time.RFC3339))
+`, symbol, price, threshold, directionText, timestamp.Format(time.RFC3339))
 }
 
 // FormatAlertHTML formats the HTML email body for an alert
-func FormatAlertHTML(symbol string, price float64, threshold float64, direction string, timestamp time.Time, confidence float64) string {
+func FormatAlertHTML(symbol string, price float64, threshold float64, direction string, timestamp time.Time) string {
 	var directionText string
 	var directionEmoji string
 	switch direction {
@@ -200,10 +198,6 @@ func FormatAlertHTML(symbol string, price float64, threshold float64, direction 
 						<td style="padding: 10px 0; text-align: right; font-weight: 600;">Price is {{.DirectionText}} threshold</td>
 					</tr>
 					<tr>
-						<td style="padding: 10px 0; color: #6b7280; font-weight: 500;">Confidence:</td>
-						<td style="padding: 10px 0; text-align: right; font-weight: 600;">{{.Confidence}}%</td>
-					</tr>
-					<tr>
 						<td style="padding: 10px 0; color: #6b7280; font-weight: 500;">Timestamp:</td>
 						<td style="padding: 10px 0; text-align: right; font-weight: 600;">{{.Timestamp}}</td>
 					</tr>
@@ -228,7 +222,6 @@ func FormatAlertHTML(symbol string, price float64, threshold float64, direction 
 		DirectionText  string
 		DirectionEmoji string
 		PriceColor     string
-		Confidence     string
 		Timestamp      string
 	}{
 		Symbol:         symbol,
@@ -237,7 +230,6 @@ func FormatAlertHTML(symbol string, price float64, threshold float64, direction 
 		DirectionText:  directionText,
 		DirectionEmoji: directionEmoji,
 		PriceColor:     priceColor,
-		Confidence:     fmt.Sprintf("%g", confidence*100),
 		Timestamp:      timestamp.Format(time.RFC3339),
 	}
 
@@ -253,11 +245,10 @@ func FormatAlertHTML(symbol string, price float64, threshold float64, direction 
 			<p><strong>Current Price:</strong> $%g</p>
 			<p><strong>Threshold:</strong> $%g</p>
 			<p><strong>Condition:</strong> Price is %s threshold</p>
-			<p><strong>Confidence:</strong> %g%%</p>
 			<p><strong>Timestamp:</strong> %s</p>
 		</body>
 		</html>
-		`, symbol, price, threshold, directionText, confidence*100, timestamp.Format(time.RFC3339))
+		`, symbol, price, threshold, directionText, timestamp.Format(time.RFC3339))
 	}
 
 	var buf strings.Builder
@@ -271,11 +262,10 @@ func FormatAlertHTML(symbol string, price float64, threshold float64, direction 
 			<p><strong>Current Price:</strong> $%g</p>
 			<p><strong>Threshold:</strong> $%g</p>
 			<p><strong>Condition:</strong> Price is %s threshold</p>
-			<p><strong>Confidence:</strong> %g%%</p>
 			<p><strong>Timestamp:</strong> %s</p>
 		</body>
 		</html>
-		`, symbol, price, threshold, directionText, confidence*100, timestamp.Format(time.RFC3339))
+		`, symbol, price, threshold, directionText, timestamp.Format(time.RFC3339))
 	}
 
 	return buf.String()
@@ -292,11 +282,10 @@ func FormatAlertEmail(decision *core.AlertDecision) (subject, textBody, htmlBody
 	threshold := decision.Rule.Threshold
 	direction := string(decision.Rule.Direction)
 	timestamp := decision.CurrentPrice.Timestamp
-	confidence := decision.CurrentPrice.Confidence
 
 	subject = FormatAlertSubject(symbol, price, threshold, direction)
-	textBody = FormatAlertMessage(symbol, price, threshold, direction, timestamp, confidence)
-	htmlBody = FormatAlertHTML(symbol, price, threshold, direction, timestamp, confidence)
+	textBody = FormatAlertMessage(symbol, price, threshold, direction, timestamp)
+	htmlBody = FormatAlertHTML(symbol, price, threshold, direction, timestamp)
 
 	return subject, textBody, htmlBody
 }

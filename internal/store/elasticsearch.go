@@ -1,4 +1,4 @@
-package logapi
+package store
 
 import (
 	"bytes"
@@ -69,7 +69,7 @@ func (c *ESClient) GetDates(ctx context.Context) ([]string, error) {
 	}
 	defer res.Body.Close()
 	if res.IsError() {
-		return nil, errFromResponse(res)
+		return nil, errFromESResponse(res)
 	}
 	var out struct {
 		Aggregations struct {
@@ -160,7 +160,7 @@ func (c *ESClient) GetLogsForDate(ctx context.Context, dateStr, after, searchQ s
 	}
 	defer res.Body.Close()
 	if res.IsError() {
-		return nil, "", errFromResponse(res)
+		return nil, "", errFromESResponse(res)
 	}
 	var out struct {
 		Hits struct {
@@ -189,7 +189,7 @@ func (c *ESClient) GetLogsForDate(ctx context.Context, dateStr, after, searchQ s
 	return entries, nextCursor, nil
 }
 
-func errFromResponse(res *esapi.Response) error {
+func errFromESResponse(res *esapi.Response) error {
 	var e struct {
 		Error struct {
 			Type   string `json:"type"`

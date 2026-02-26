@@ -2,6 +2,15 @@
 
 A Go-based Cryptocurrency price / DeFi protocol data alert system that monitors prices from Oracle / protocol contract and sends alerts when thresholds are met.
 
+## Tech Stack
+
+- Backend Service: Golang
+- Frontend: React
+- Database: MySQL & Elastic Search
+- Container: Docker
+- Message Queue: Kafka
+- Email Service: Resend
+
 ## Project Structure
 
 ```
@@ -9,7 +18,9 @@ crypto-alert/
 ├── cmd
 │   ├── api
 │   │   └── main.go
-│   └── main.go
+│   ├── main.go
+│   └── notification-service
+│       └── main.go
 ├── docker-compose.yml
 ├── Dockerfile
 ├── frontend
@@ -39,7 +50,6 @@ crypto-alert/
 │   ├── config
 │   │   └── config.go
 │   ├── core
-│   │   ├── decision_test.go
 │   │   └── decision.go
 │   ├── data
 │   │   ├── defi
@@ -63,16 +73,17 @@ crypto-alert/
 │   │   │       └── polymarket.go
 │   │   └── price
 │   │       └── pyth.go
-│   ├── logapi
-│   │   ├── es.go
-│   │   └── file.go
 │   ├── logger
 │   │   ├── elasticsearch.go
 │   │   └── logger.go
 │   ├── message
 │   │   ├── email_template.go
+│   │   ├── events.go
+│   │   ├── kafka_publisher.go
 │   │   └── sender.go
 │   ├── store
+│   │   ├── elasticsearch.go
+│   │   ├── logfile.go
 │   │   └── mysql.go
 │   └── utils
 │       └── rpcutil.go
@@ -84,13 +95,12 @@ crypto-alert/
 
 ## Web3 Data Integration
 
-| Type | Oracle | Protocol / DApp | Market / Vault | Version | Chain          | Price     | TVL  | APY  | UTILIZATION | LIQUIDITY |
-| ------------- | -------------- | ------- | -------------- | ---- | ---- | ----------- | --------- | ------------- | ------------- | ------------- |
-| Token | Pyth |  |  |  |  | ✔️ |  |  |  |  |
-| DeFi      |           | AAVE          | Market         | V3      | ETH, Base, ARB |  | ✔️ | ✔️ | ✔️        | ✔️      |
-| DeFi    |         | Morpho        | Market         | V1      | ETH, Base, ARB |  | ✔️ |    | ✔️        | ✔️      |
-| DeFi    |         | Morpho        | Vault          | V1      | ETH, Base, ARB |  | ✔️ | ✔️ | ✔️        | ✔️      |
-| DeFi    |         | Morpho        | Vault          | V2      | ETH, Base, ARB |  | ✔️ | ✔️ | ✔️        | ✔️      |
-| DeFi    |         | Kamino        | Vault          | V2      | Solana         |          | ✔️ | ✔️ | ✔️        | ✔️      |
-| Prediction Market |  | Polymarket |  |  |  | ✔️ |  |  |  |  |
-
+| Type              | Oracle | Protocol / DApp | Market / Vault | Version | Chain          | Price | TVL  | APY  | UTILIZATION | LIQUIDITY |
+| ----------------- | ------ | --------------- | -------------- | ------- | -------------- | ----- | ---- | ---- | ----------- | --------- |
+| Token             | Pyth   |                 |                |         |                | ✔️  |      |      |             |           |
+| DeFi              |        | AAVE            | Market         | V3      | ETH, Base, ARB |       | ✔️ | ✔️ | ✔️        | ✔️      |
+| DeFi              |        | Morpho          | Market         | V1      | ETH, Base, ARB |       | ✔️ |      | ✔️        | ✔️      |
+| DeFi              |        | Morpho          | Vault          | V1      | ETH, Base, ARB |       | ✔️ | ✔️ | ✔️        | ✔️      |
+| DeFi              |        | Morpho          | Vault          | V2      | ETH, Base, ARB |       | ✔️ | ✔️ | ✔️        | ✔️      |
+| DeFi              |        | Kamino          | Vault          | V2      | Solana         |       | ✔️ | ✔️ | ✔️        | ✔️      |
+| Prediction Market |        | Polymarket      |                |         |                | ✔️  |      |      |             |           |

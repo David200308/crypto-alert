@@ -1,4 +1,4 @@
-package logapi
+package store
 
 import (
 	"strings"
@@ -46,7 +46,9 @@ func GetLogsFromFile(content string, after, searchQ string) ([]LogEntry, string)
 			continue
 		}
 		entries = append(entries, LogEntry{Message: line, TS: tsStr})
-		nextCursor = tsStr
+		if tsStr != "" {
+			nextCursor = tsStr
+		}
 	}
 	return entries, nextCursor
 }

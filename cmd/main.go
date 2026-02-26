@@ -41,15 +41,11 @@ func main() {
 	pythClient := price.NewPythClient(cfg.PythAPIURL, cfg.PythAPIKey)
 	decisionEngine := core.NewDecisionEngine()
 
-	// Setup Resend email sender
-	if cfg.ResendAPIKey == "" {
-		log.Fatal("RESEND_API_KEY is required in .env file")
-	}
-	if cfg.ResendFromEmail == "" {
-		log.Fatal("RESEND_FROM_EMAIL is required in .env file")
-	}
-
-	emailSender := message.NewResendEmailSender(cfg.ResendAPIKey, cfg.ResendFromEmail)
+	// Setup Kafka alert publisher (notification-service handles email delivery)
+	kafkaPublisher := message.NewKafkaAlertPublisher(cfg.KafkaBrokers)
+	defer kafkaPublisher.Close()
+	var emailSender message.MessageSender = kafkaPublisher
+	log.Printf("📨 Kafka publisher connected to brokers: %v", cfg.KafkaBrokers)
 
 	// Load alert rules from MySQL
 	if err := loadAlertRulesFromMySQL(decisionEngine, cfg.MySQLDSN); err != nil {
@@ -181,7 +177,7 @@ func checkAndAlert(
 			log.Printf("⚠️  Invalid price data for %s: %v", symbol, err)
 			continue
 		}
-		log.Printf("💰 %s: $%g (confidence: %g)", symbol, priceData.Price, priceData.Confidence)
+		log.Printf("💰 %s: $%g", symbol, priceData.Price)
 	}
 
 	// Evaluate alert rules

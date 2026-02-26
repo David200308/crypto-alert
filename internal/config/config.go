@@ -31,6 +31,9 @@ type Config struct {
 	ESEnabled   bool     // Enable shipping logs to Elasticsearch
 	ESAddresses []string // ES endpoints, e.g. []string{"http://localhost:9200"}
 	ESIndex     string   // Index name for logs (default: "crypto-alert-logs")
+
+	// Kafka Configuration
+	KafkaBrokers []string // Kafka broker addresses, e.g. []string{"localhost:9092"}
 }
 
 // LoadConfig loads configuration from environment variables
@@ -49,6 +52,7 @@ func LoadConfig() (*Config, error) {
 		ESEnabled:        getEnvBool("ES_ENABLED", true),
 		ESAddresses:      getEnvSlice("ES_ADDRESSES", []string{"http://localhost:9200"}),
 		ESIndex:          getEnv("ES_INDEX", "crypto-alert-logs"),
+		KafkaBrokers:     getEnvSlice("KAFKA_BROKERS", []string{"localhost:9092"}),
 	}
 
 	return config, nil

@@ -15,10 +15,9 @@ import (
 
 // PriceData represents price information from Pyth oracle
 type PriceData struct {
-	Symbol     string
-	Price      float64
-	Timestamp  time.Time
-	Confidence float64
+	Symbol    string
+	Price     float64
+	Timestamp time.Time
 }
 
 // PythClient handles interactions with Pyth oracle
@@ -90,7 +89,6 @@ func (c *PythClient) GetPrice(ctx context.Context, symbol string, priceFeedID st
 			ID    string `json:"id"`
 			Price struct {
 				Price       string `json:"price"`
-				Conf        string `json:"conf"`
 				Expo        int    `json:"expo"`
 				PublishTime int64  `json:"publish_time"`
 			} `json:"price"`
@@ -123,21 +121,13 @@ func (c *PythClient) GetPrice(ctx context.Context, symbol string, priceFeedID st
 	// Convert to float and adjust for exponent (10^expo) - use exact calculation
 	price := float64(priceInt) * math.Pow(10, float64(priceInfo.Expo))
 
-	// Parse confidence (same format)
-	confInt, err := strconv.ParseInt(priceInfo.Conf, 10, 64)
-	if err != nil {
-		return nil, fmt.Errorf("failed to parse confidence for %s: %w", symbol, err)
-	}
-	confidence := float64(confInt) * math.Pow(10, float64(priceInfo.Expo))
-
 	// Convert publish time to timestamp
 	publishTime := time.Unix(priceInfo.PublishTime, 0)
 
 	priceData := &PriceData{
-		Symbol:     symbol,
-		Price:      price,
-		Timestamp:  publishTime,
-		Confidence: confidence,
+		Symbol:    symbol,
+		Price:     price,
+		Timestamp: publishTime,
 	}
 
 	return priceData, nil

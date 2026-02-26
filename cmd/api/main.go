@@ -13,7 +13,7 @@ import (
 	"time"
 
 	"crypto-alert/internal/config"
-	"crypto-alert/internal/logapi"
+	"crypto-alert/internal/store"
 )
 
 func main() {
@@ -34,10 +34,10 @@ func main() {
 	}
 
 	// Optional: ES client for log data (when ES is enabled)
-	var esLog *logapi.ESClient
+	var esLog *store.ESClient
 	if cfg.ESEnabled && len(cfg.ESAddresses) > 0 && cfg.ESIndex != "" {
 		var err error
-		esLog, err = logapi.NewESClient(cfg.ESAddresses, cfg.ESIndex)
+		esLog, err = store.NewESClient(cfg.ESAddresses, cfg.ESIndex)
 		if err != nil {
 			log.Printf("⚠️ Elasticsearch log source disabled: %v", err)
 			esLog = nil
@@ -90,7 +90,7 @@ func maskEmails(s string) string {
 	})
 }
 
-func handleGetDates(w http.ResponseWriter, r *http.Request, logDir string, esLog *logapi.ESClient) {
+func handleGetDates(w http.ResponseWriter, r *http.Request, logDir string, esLog *store.ESClient) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
@@ -139,7 +139,7 @@ func handleGetDates(w http.ResponseWriter, r *http.Request, logDir string, esLog
 	json.NewEncoder(w).Encode(dates)
 }
 
-func handleGetLogs(w http.ResponseWriter, r *http.Request, logDir string, esLog *logapi.ESClient) {
+func handleGetLogs(w http.ResponseWriter, r *http.Request, logDir string, esLog *store.ESClient) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
@@ -162,7 +162,7 @@ func handleGetLogs(w http.ResponseWriter, r *http.Request, logDir string, esLog 
 	after := strings.TrimSpace(r.URL.Query().Get("after")) // cursor: only return logs after this timestamp (RFC3339)
 	searchQ := strings.TrimSpace(r.URL.Query().Get("q"))   // search: filter by message content (backend-side)
 
-	var entries []logapi.LogEntry
+	var entries []store.LogEntry
 	var nextCursor string
 
 	// Prefer Elasticsearch when available
@@ -180,7 +180,7 @@ func handleGetLogs(w http.ResponseWriter, r *http.Request, logDir string, esLog 
 	if len(entries) == 0 {
 		logFile := filepath.Join(logDir, fmt.Sprintf("%s.log", path))
 		if content, err := os.ReadFile(logFile); err == nil {
-			entries, nextCursor = logapi.GetLogsFromFile(string(content), after, searchQ)
+			entries, nextCursor = store.GetLogsFromFile(string(content), after, searchQ)
 		}
 	}
 

@@ -61,7 +61,7 @@ func consumeTokenAlerts(ctx context.Context, brokers []string, resend *message.R
 	defer r.Close()
 
 	for {
-		msg, err := r.ReadMessage(ctx)
+		msg, err := r.FetchMessage(ctx)
 		if err != nil {
 			if ctx.Err() != nil {
 				return
@@ -73,6 +73,7 @@ func consumeTokenAlerts(ctx context.Context, brokers []string, resend *message.R
 		var event message.TokenAlertEvent
 		if err := json.Unmarshal(msg.Value, &event); err != nil {
 			log.Printf("⚠️  [alerts.token] unmarshal error: %v", err)
+			_ = r.CommitMessages(ctx, msg)
 			continue
 		}
 
@@ -95,6 +96,8 @@ func consumeTokenAlerts(ctx context.Context, brokers []string, resend *message.R
 		} else {
 			log.Printf("✅ [alerts.token] sent alert for %s to %s", event.Symbol, event.RecipientEmail)
 		}
+		// Commit after send attempt (success or permanent failure); retried on restart otherwise
+		_ = r.CommitMessages(ctx, msg)
 	}
 }
 
@@ -104,7 +107,7 @@ func consumeDeFiAlerts(ctx context.Context, brokers []string, resend *message.Re
 	defer r.Close()
 
 	for {
-		msg, err := r.ReadMessage(ctx)
+		msg, err := r.FetchMessage(ctx)
 		if err != nil {
 			if ctx.Err() != nil {
 				return
@@ -116,6 +119,7 @@ func consumeDeFiAlerts(ctx context.Context, brokers []string, resend *message.Re
 		var event message.DeFiAlertEvent
 		if err := json.Unmarshal(msg.Value, &event); err != nil {
 			log.Printf("⚠️  [alerts.defi] unmarshal error: %v", err)
+			_ = r.CommitMessages(ctx, msg)
 			continue
 		}
 
@@ -152,6 +156,7 @@ func consumeDeFiAlerts(ctx context.Context, brokers []string, resend *message.Re
 		} else {
 			log.Printf("✅ [alerts.defi] sent alert for %s %s to %s", event.Protocol, event.Field, event.RecipientEmail)
 		}
+		_ = r.CommitMessages(ctx, msg)
 	}
 }
 
@@ -161,7 +166,7 @@ func consumePredictAlerts(ctx context.Context, brokers []string, resend *message
 	defer r.Close()
 
 	for {
-		msg, err := r.ReadMessage(ctx)
+		msg, err := r.FetchMessage(ctx)
 		if err != nil {
 			if ctx.Err() != nil {
 				return
@@ -173,6 +178,7 @@ func consumePredictAlerts(ctx context.Context, brokers []string, resend *message
 		var event message.PredictMarketAlertEvent
 		if err := json.Unmarshal(msg.Value, &event); err != nil {
 			log.Printf("⚠️  [alerts.predict] unmarshal error: %v", err)
+			_ = r.CommitMessages(ctx, msg)
 			continue
 		}
 
@@ -201,6 +207,7 @@ func consumePredictAlerts(ctx context.Context, brokers []string, resend *message
 		} else {
 			log.Printf("✅ [alerts.predict] sent alert for %s to %s", event.Question, event.RecipientEmail)
 		}
+		_ = r.CommitMessages(ctx, msg)
 	}
 }
 

@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 
 	"crypto-alert/internal/core"
@@ -34,6 +35,9 @@ type Config struct {
 
 	// Kafka Configuration
 	KafkaBrokers []string // Kafka broker addresses, e.g. []string{"localhost:9092"}
+
+	// Hot-swap Configuration
+	RuleReloadInterval int // seconds between MySQL rule re-reads (0 = disabled)
 }
 
 // LoadConfig loads configuration from environment variables
@@ -52,7 +56,8 @@ func LoadConfig() (*Config, error) {
 		ESEnabled:        getEnvBool("ES_ENABLED", true),
 		ESAddresses:      getEnvSlice("ES_ADDRESSES", []string{"http://localhost:9200"}),
 		ESIndex:          getEnv("ES_INDEX", "crypto-alert-logs"),
-		KafkaBrokers:     getEnvSlice("KAFKA_BROKERS", []string{"localhost:9092"}),
+		KafkaBrokers:       getEnvSlice("KAFKA_BROKERS", []string{"localhost:9092"}),
+		RuleReloadInterval: getEnvInt("RULE_RELOAD_INTERVAL", 60),
 	}
 
 	return config, nil
@@ -468,6 +473,18 @@ func getEnvBool(key string, defaultValue bool) bool {
 		return true
 	case "0", "false", "no", "FALSE", "NO":
 		return false
+	}
+	return defaultValue
+}
+
+// getEnvInt returns an integer from an env var; if empty or invalid, returns defaultValue
+func getEnvInt(key string, defaultValue int) int {
+	v := os.Getenv(key)
+	if v == "" {
+		return defaultValue
+	}
+	if n, err := strconv.Atoi(v); err == nil {
+		return n
 	}
 	return defaultValue
 }

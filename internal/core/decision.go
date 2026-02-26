@@ -2,6 +2,7 @@ package core
 
 import (
 	"fmt"
+	"sync"
 	"time"
 
 	"crypto-alert/internal/data/price"
@@ -36,6 +37,7 @@ type Frequency struct {
 
 // AlertRule defines a price alert rule
 type AlertRule struct {
+	ID             int64 // MySQL row ID — used for hot-swap matching
 	Symbol         string
 	PriceFeedID    string // Pyth price feed ID for this symbol
 	Threshold      float64
@@ -48,31 +50,32 @@ type AlertRule struct {
 
 // DeFiAlertRule defines a DeFi protocol alert rule
 type DeFiAlertRule struct {
-	Protocol            string
-	Category            string // "market" or "vault" (for Morpho), empty for others
-	Version             string
-	ChainID             string
-	MarketTokenContract string // For Aave: token contract, For Morpho market: market_id, For Morpho vault: vault_token_address
-	Field               string // "TVL", "APY", "UTILIZATION", "LIQUIDITY"
-	Threshold           float64
-	Direction           Direction // >=, >, =, <=, <
-	Enabled             bool
-	RecipientEmail      string
-	LastTriggered       *time.Time
-	Frequency           *Frequency
+	ID                      int64 // MySQL row ID — used for hot-swap matching
+	Protocol                string
+	Category                string // "market" or "vault" (for Morpho), empty for others
+	Version                 string
+	ChainID                 string
+	MarketTokenContract     string // For Aave: token contract, For Morpho market: market_id, For Morpho vault: vault_token_address
+	Field                   string // "TVL", "APY", "UTILIZATION", "LIQUIDITY"
+	Threshold               float64
+	Direction               Direction // >=, >, =, <=, <
+	Enabled                 bool
+	RecipientEmail          string
+	LastTriggered           *time.Time
+	Frequency               *Frequency
 	// Display names (optional, for better logging/alert messages)
-	MarketTokenName     string // For Aave: display name of the token (e.g., "USDC")
-	MarketTokenPair     string // For Morpho market: display pair (e.g., "USDC/WETH")
-	VaultName           string // For Morpho vault: display name of the vault
+	MarketTokenName         string // For Aave: display name of the token (e.g., "USDC")
+	MarketTokenPair         string // For Morpho market: display pair (e.g., "USDC/WETH")
+	VaultName               string // For Morpho vault: display name of the vault
 	// Morpho-specific fields
-	BorrowTokenContract   string // For Morpho market (loan token)
+	BorrowTokenContract     string // For Morpho market (loan token)
 	CollateralTokenContract string // For Morpho market
-	OracleAddress         string // For Morpho market: oracle contract address
-	IRMAddress            string // For Morpho market: Interest Rate Model address
-	LLTV                  string // For Morpho market: Loan-to-Liquidation Value
-	MarketContractAddress string // For Morpho market: Market contract address (optional)
-	VaultTokenAddress     string // For Morpho vault (same as MarketTokenContract)
-	DepositTokenContract  string // For Morpho vault
+	OracleAddress           string // For Morpho market: oracle contract address
+	IRMAddress              string // For Morpho market: Interest Rate Model address
+	LLTV                    string // For Morpho market: Loan-to-Liquidation Value
+	MarketContractAddress   string // For Morpho market: Market contract address (optional)
+	VaultTokenAddress       string // For Morpho vault (same as MarketTokenContract)
+	DepositTokenContract    string // For Morpho vault
 }
 
 // AlertDecision represents the result of evaluating an alert rule
@@ -85,16 +88,17 @@ type AlertDecision struct {
 
 // DeFiAlertDecision represents the result of evaluating a DeFi alert rule
 type DeFiAlertDecision struct {
-	ShouldAlert bool
-	Rule        *DeFiAlertRule
+	ShouldAlert  bool
+	Rule         *DeFiAlertRule
 	CurrentValue float64
-	ChainName   string
-	Message     string
+	ChainName    string
+	Message      string
 }
 
 // PredictMarketAlertRule defines a prediction market alert rule.
 // Threshold comparison is performed against the midpoint price.
 type PredictMarketAlertRule struct {
+	ID             int64 // MySQL row ID — used for hot-swap matching
 	PredictMarket  string     // e.g., "polymarket"
 	TokenID        string     // CLOB token ID to monitor
 	Field          string     // "MIDPOINT"
@@ -122,11 +126,13 @@ type PredictMarketAlertDecision struct {
 	Message          string
 }
 
-// DecisionEngine handles price comparison and alert decisions
+// DecisionEngine handles price comparison and alert decisions.
+// All exported methods are thread-safe.
 type DecisionEngine struct {
-	rules               []*AlertRule
-	defiRules           []*DeFiAlertRule
-	predictMarketRules  []*PredictMarketAlertRule
+	mu                 sync.Mutex
+	rules              []*AlertRule
+	defiRules          []*DeFiAlertRule
+	predictMarketRules []*PredictMarketAlertRule
 }
 
 // NewDecisionEngine creates a new decision engine
@@ -140,16 +146,29 @@ func NewDecisionEngine() *DecisionEngine {
 
 // AddRule adds an alert rule to the engine
 func (e *DecisionEngine) AddRule(rule *AlertRule) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
 	e.rules = append(e.rules, rule)
 }
 
 // AddDeFiRule adds a DeFi alert rule to the engine
 func (e *DecisionEngine) AddDeFiRule(rule *DeFiAlertRule) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
 	e.defiRules = append(e.defiRules, rule)
+}
+
+// AddPredictMarketRule adds a prediction market alert rule to the engine
+func (e *DecisionEngine) AddPredictMarketRule(rule *PredictMarketAlertRule) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.predictMarketRules = append(e.predictMarketRules, rule)
 }
 
 // RemoveRule removes an alert rule by symbol
 func (e *DecisionEngine) RemoveRule(symbol string) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
 	for i, rule := range e.rules {
 		if rule.Symbol == symbol {
 			e.rules = append(e.rules[:i], e.rules[i+1:]...)
@@ -158,28 +177,91 @@ func (e *DecisionEngine) RemoveRule(symbol string) {
 	}
 }
 
-// GetRules returns all alert rules
+// GetRules returns a snapshot of all alert rules
 func (e *DecisionEngine) GetRules() []*AlertRule {
-	return e.rules
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	cp := make([]*AlertRule, len(e.rules))
+	copy(cp, e.rules)
+	return cp
 }
 
-// GetDeFiRules returns all DeFi alert rules
+// GetDeFiRules returns a snapshot of all DeFi alert rules
 func (e *DecisionEngine) GetDeFiRules() []*DeFiAlertRule {
-	return e.defiRules
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	cp := make([]*DeFiAlertRule, len(e.defiRules))
+	copy(cp, e.defiRules)
+	return cp
 }
 
-// AddPredictMarketRule adds a prediction market alert rule to the engine
-func (e *DecisionEngine) AddPredictMarketRule(rule *PredictMarketAlertRule) {
-	e.predictMarketRules = append(e.predictMarketRules, rule)
-}
-
-// GetPredictMarketRules returns all prediction market alert rules
+// GetPredictMarketRules returns a snapshot of all prediction market alert rules
 func (e *DecisionEngine) GetPredictMarketRules() []*PredictMarketAlertRule {
-	return e.predictMarketRules
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	cp := make([]*PredictMarketAlertRule, len(e.predictMarketRules))
+	copy(cp, e.predictMarketRules)
+	return cp
 }
 
-// Evaluate checks if a price should trigger an alert based on rules
+// ReplaceRules atomically swaps all rule sets, preserving LastTriggered from
+// existing rules that share the same MySQL ID. Call this to hot-reload rules
+// from the database without restarting the process.
+func (e *DecisionEngine) ReplaceRules(price []*AlertRule, defi []*DeFiAlertRule, predict []*PredictMarketAlertRule) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	// Build lookup maps keyed by MySQL ID to carry over in-memory state.
+	oldPrice := make(map[int64]*AlertRule, len(e.rules))
+	for _, r := range e.rules {
+		if r.ID != 0 {
+			oldPrice[r.ID] = r
+		}
+	}
+	oldDefi := make(map[int64]*DeFiAlertRule, len(e.defiRules))
+	for _, r := range e.defiRules {
+		if r.ID != 0 {
+			oldDefi[r.ID] = r
+		}
+	}
+	oldPredict := make(map[int64]*PredictMarketAlertRule, len(e.predictMarketRules))
+	for _, r := range e.predictMarketRules {
+		if r.ID != 0 {
+			oldPredict[r.ID] = r
+		}
+	}
+
+	// Carry LastTriggered forward so frequency suppression survives a reload.
+	for _, r := range price {
+		if old, ok := oldPrice[r.ID]; ok {
+			r.LastTriggered = old.LastTriggered
+		}
+	}
+	for _, r := range defi {
+		if old, ok := oldDefi[r.ID]; ok {
+			r.LastTriggered = old.LastTriggered
+		}
+	}
+	for _, r := range predict {
+		if old, ok := oldPredict[r.ID]; ok {
+			r.LastTriggered = old.LastTriggered
+		}
+	}
+
+	e.rules = price
+	e.defiRules = defi
+	e.predictMarketRules = predict
+}
+
+// Evaluate checks if a price should trigger an alert based on rules.
 func (e *DecisionEngine) Evaluate(priceData *price.PriceData) []*AlertDecision {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.evaluateLocked(priceData)
+}
+
+// evaluateLocked runs evaluation for a single price; caller must hold e.mu.
+func (e *DecisionEngine) evaluateLocked(priceData *price.PriceData) []*AlertDecision {
 	decisions := make([]*AlertDecision, 0)
 
 	for _, rule := range e.rules {
@@ -306,10 +388,12 @@ func (e *DecisionEngine) Evaluate(priceData *price.PriceData) []*AlertDecision {
 
 // EvaluateAll evaluates all rules against multiple price data points
 func (e *DecisionEngine) EvaluateAll(prices map[string]*price.PriceData) []*AlertDecision {
-	allDecisions := make([]*AlertDecision, 0)
+	e.mu.Lock()
+	defer e.mu.Unlock()
 
+	allDecisions := make([]*AlertDecision, 0)
 	for _, priceData := range prices {
-		decisions := e.Evaluate(priceData)
+		decisions := e.evaluateLocked(priceData)
 		allDecisions = append(allDecisions, decisions...)
 	}
 
@@ -319,6 +403,13 @@ func (e *DecisionEngine) EvaluateAll(prices map[string]*price.PriceData) []*Aler
 // EvaluatePredictMarket checks if a prediction market midpoint should trigger an alert.
 // buyPrice and sellPrice are passed through to the decision for inclusion in alert emails.
 func (e *DecisionEngine) EvaluatePredictMarket(tokenID string, midpoint, buyPrice, sellPrice float64) []*PredictMarketAlertDecision {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.evaluatePredictMarketLocked(tokenID, midpoint, buyPrice, sellPrice)
+}
+
+// evaluatePredictMarketLocked is the lock-free implementation; caller must hold e.mu.
+func (e *DecisionEngine) evaluatePredictMarketLocked(tokenID string, midpoint, buyPrice, sellPrice float64) []*PredictMarketAlertDecision {
 	decisions := make([]*PredictMarketAlertDecision, 0)
 
 	for _, rule := range e.predictMarketRules {
@@ -428,6 +519,13 @@ func (e *DecisionEngine) EvaluatePredictMarket(tokenID string, midpoint, buyPric
 
 // EvaluateDeFi checks if a DeFi value should trigger an alert based on rules
 func (e *DecisionEngine) EvaluateDeFi(chainID, tokenAddress, field string, currentValue float64, chainName string) []*DeFiAlertDecision {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.evaluateDeFiLocked(chainID, tokenAddress, field, currentValue, chainName)
+}
+
+// evaluateDeFiLocked is the lock-free implementation; caller must hold e.mu.
+func (e *DecisionEngine) evaluateDeFiLocked(chainID, tokenAddress, field string, currentValue float64, chainName string) []*DeFiAlertDecision {
 	decisions := make([]*DeFiAlertDecision, 0)
 
 	for _, rule := range e.defiRules {

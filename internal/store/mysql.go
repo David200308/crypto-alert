@@ -115,6 +115,7 @@ func loadPredictMarketRules(db *sql.DB) ([]*core.PredictMarketAlertRule, error) 
 		if err != nil {
 			return nil, fmt.Errorf("predict market rule id %d: %w", id, err)
 		}
+		rule.ID = id
 		rules = append(rules, rule)
 	}
 	return rules, rows.Err()
@@ -160,6 +161,7 @@ func loadTokenRules(db *sql.DB) ([]*core.AlertRule, error) {
 		if err != nil {
 			return nil, fmt.Errorf("token rule id %d: %w", id, err)
 		}
+		rule.ID = id
 		rules = append(rules, rule)
 	}
 	return rules, rows.Err()
@@ -227,6 +229,7 @@ func loadDeFiRules(db *sql.DB) ([]*core.DeFiAlertRule, error) {
 		if err != nil {
 			return nil, fmt.Errorf("defi rule id %d: %w", id, err)
 		}
+		rule.ID = id
 		rules = append(rules, rule)
 	}
 	return rules, rows.Err()

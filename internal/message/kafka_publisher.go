@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"time"
 
 	"crypto-alert/internal/core"
 
@@ -19,8 +20,11 @@ type KafkaAlertPublisher struct {
 // NewKafkaAlertPublisher creates a publisher that writes to the given Kafka brokers.
 func NewKafkaAlertPublisher(brokers []string) *KafkaAlertPublisher {
 	w := &kafka.Writer{
-		Addr:     kafka.TCP(brokers...),
-		Balancer: &kafka.LeastBytes{},
+		Addr:                   kafka.TCP(brokers...),
+		Balancer:               &kafka.LeastBytes{},
+		AllowAutoTopicCreation: true,
+		WriteTimeout:           15 * time.Second,
+		ReadTimeout:            15 * time.Second,
 	}
 	return &KafkaAlertPublisher{writer: w}
 }
@@ -115,7 +119,9 @@ func (p *KafkaAlertPublisher) publish(topic string, event any) error {
 	if err != nil {
 		return fmt.Errorf("marshal kafka event for topic %s: %w", topic, err)
 	}
-	return p.writer.WriteMessages(context.Background(), kafka.Message{
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	return p.writer.WriteMessages(ctx, kafka.Message{
 		Topic: topic,
 		Value: data,
 	})

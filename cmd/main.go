@@ -52,6 +52,11 @@ func main() {
 		log.Fatalf("Failed to load alert rules from MySQL: %v", err)
 	}
 
+	// Load prediction market rules from MySQL (before goroutines start)
+	if err := loadPredictMarketRulesFromMySQL(decisionEngine, cfg.MySQLDSN); err != nil {
+		log.Printf("⚠️  Failed to load prediction market rules from MySQL: %v", err)
+	}
+
 	// Create context for graceful shutdown
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -65,12 +70,12 @@ func main() {
 	go monitorDeFi(ctx, decisionEngine, emailSender, cfg)
 	go monitorPredictMarkets(ctx, decisionEngine, emailSender, cfg)
 
-	log.Println("🚀 Crypto Alert System started")
-
-	// Load prediction market rules from MySQL
-	if err := loadPredictMarketRulesFromMySQL(decisionEngine, cfg.MySQLDSN); err != nil {
-		log.Printf("⚠️  Failed to load prediction market rules from MySQL: %v", err)
+	// Start hot-reload loop (periodically re-reads rules from MySQL without restart)
+	if cfg.RuleReloadInterval > 0 {
+		go reloadRulesLoop(ctx, decisionEngine, cfg)
 	}
+
+	log.Println("🚀 Crypto Alert System started")
 
 	// Get symbols from alert rules for logging
 	rules := decisionEngine.GetRules()
@@ -189,6 +194,8 @@ func checkAndAlert(
 			log.Printf("🚨 Alert triggered: %s", decision.Message)
 			if err := sender.SendAlert(decision.Rule.RecipientEmail, decision); err != nil {
 				log.Printf("❌ Failed to send alert to %s: %v", decision.Rule.RecipientEmail, err)
+			} else {
+				log.Printf("✅ Alert published for %s to %s", decision.CurrentPrice.Symbol, decision.Rule.RecipientEmail)
 			}
 		}
 	}
@@ -262,9 +269,10 @@ func checkAndAlertDeFi(
 		for _, decision := range decisions {
 			if decision.ShouldAlert {
 				log.Printf("🚨 Alert triggered: %s", decision.Message)
-				// Send email to the recipient specified in the alert rule
 				if err := sender.SendDeFiAlert(decision.Rule.RecipientEmail, decision); err != nil {
-					log.Printf("❌ Failed to send alert to %s: %v", decision.Rule.RecipientEmail, err)
+					log.Printf("❌ Failed to send DeFi alert to %s: %v", decision.Rule.RecipientEmail, err)
+				} else {
+					log.Printf("✅ DeFi alert published for %s %s to %s", decision.Rule.Protocol, decision.Rule.Field, decision.Rule.RecipientEmail)
 				}
 			}
 		}
@@ -377,12 +385,45 @@ func checkAndAlertPredictMarkets(
 				log.Printf("🚨 Alert triggered: %s", decision.Message)
 				if err := sender.SendPredictMarketAlert(decision.Rule.RecipientEmail, decision); err != nil {
 					log.Printf("❌ Failed to send predict market alert to %s: %v", decision.Rule.RecipientEmail, err)
+				} else {
+					log.Printf("✅ Predict market alert published for %s to %s", decision.Rule.Question, decision.Rule.RecipientEmail)
 				}
 			}
 		}
 	}
 
 	return nil
+}
+
+// reloadRulesLoop periodically fetches all rules from MySQL and hot-swaps them
+// into the engine, preserving LastTriggered so frequency suppression survives.
+func reloadRulesLoop(ctx context.Context, engine *core.DecisionEngine, cfg *config.Config) {
+	ticker := time.NewTicker(time.Duration(cfg.RuleReloadInterval) * time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			reloadRules(engine, cfg)
+		}
+	}
+}
+
+func reloadRules(engine *core.DecisionEngine, cfg *config.Config) {
+	priceRules, defiRules, err := store.LoadAlertRulesFromMySQL(cfg.MySQLDSN)
+	if err != nil {
+		log.Printf("⚠️  Hot-reload: failed to load token/DeFi rules: %v", err)
+		return
+	}
+	predictRules, err := store.LoadPredictMarketRulesFromMySQL(cfg.MySQLDSN)
+	if err != nil {
+		log.Printf("⚠️  Hot-reload: failed to load predict market rules: %v", err)
+		return
+	}
+	engine.ReplaceRules(priceRules, defiRules, predictRules)
+	log.Printf("🔄 Hot-reload: %d price, %d DeFi, %d predict market rule(s) active",
+		len(priceRules), len(defiRules), len(predictRules))
 }
 
 func addAlertRulesToEngine(engine *core.DecisionEngine, priceRules []*core.AlertRule, defiRules []*core.DeFiAlertRule, source string) error {

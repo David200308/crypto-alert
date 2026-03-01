@@ -21,6 +21,7 @@ crypto-alert/
 │   ├── main.go
 │   └── notification-service
 │       └── main.go
+├── deploy.sh
 ├── docker-compose.yml
 ├── Dockerfile
 ├── frontend
@@ -78,9 +79,10 @@ crypto-alert/
 │   │   └── logger.go
 │   ├── message
 │   │   ├── email_template.go
+│   │   ├── email.go
 │   │   ├── events.go
 │   │   ├── kafka_publisher.go
-│   │   └── sender.go
+│   │   └── telegram.go
 │   ├── store
 │   │   ├── elasticsearch.go
 │   │   ├── logfile.go
@@ -95,12 +97,23 @@ crypto-alert/
 
 ## Web3 Data Integration
 
-| Type              | Oracle | Protocol / DApp | Market / Vault | Version | Chain          | Price | TVL  | APY  | UTILIZATION | LIQUIDITY |
-| ----------------- | ------ | --------------- | -------------- | ------- | -------------- | ----- | ---- | ---- | ----------- | --------- |
-| Token             | Pyth   |                 |                |         |                | ✔️  |      |      |             |           |
-| DeFi              |        | AAVE            | Market         | V3      | ETH, Base, ARB |       | ✔️ | ✔️ | ✔️        | ✔️      |
-| DeFi              |        | Morpho          | Market         | V1      | ETH, Base, ARB |       | ✔️ |      | ✔️        | ✔️      |
-| DeFi              |        | Morpho          | Vault          | V1      | ETH, Base, ARB |       | ✔️ | ✔️ | ✔️        | ✔️      |
-| DeFi              |        | Morpho          | Vault          | V2      | ETH, Base, ARB |       | ✔️ | ✔️ | ✔️        | ✔️      |
-| DeFi              |        | Kamino          | Vault          | V2      | Solana         |       | ✔️ | ✔️ | ✔️        | ✔️      |
-| Prediction Market |        | Polymarket      |                |         |                | ✔️  |      |      |             |           |
+
+| Type              | Oracle | Protocol / DApp | Market / Vault | Version | Chain          | Price | TVL | APY | UTILIZATION | LIQUIDITY |
+| ----------------- | ------ | --------------- | -------------- | ------- | -------------- | ----- | --- | --- | ----------- | --------- |
+| Token             | Pyth   |                 |                |         |                | ✔️    |     |     |             |           |
+| DeFi              |        | AAVE            | Market         | V3      | ETH, Base, ARB |       | ✔️  | ✔️  | ✔️          | ✔️        |
+| DeFi              |        | Morpho          | Market         | V1      | ETH, Base, ARB |       | ✔️  |     | ✔️          | ✔️        |
+| DeFi              |        | Morpho          | Vault          | V1      | ETH, Base, ARB |       | ✔️  | ✔️  | ✔️          | ✔️        |
+| DeFi              |        | Morpho          | Vault          | V2      | ETH, Base, ARB |       | ✔️  | ✔️  | ✔️          | ✔️        |
+| DeFi              |        | Kamino          | Vault          | V2      | Solana         |       | ✔️  | ✔️  | ✔️          | ✔️        |
+| Prediction Market |        | Polymarket      |                |         |                | ✔️    |     |     |             |           |
+
+
+## Message Channel Integration
+
+
+| Type  | Provider |
+| ----- | -------- |
+| Email | Resend   |
+| Bot   | Telegram |
+

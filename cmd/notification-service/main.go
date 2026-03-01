@@ -25,6 +25,7 @@ func main() {
 	brokers := envSlice("KAFKA_BROKERS", "localhost:9092")
 	resendKey := os.Getenv("RESEND_API_KEY")
 	resendFrom := os.Getenv("RESEND_FROM_EMAIL")
+	telegramToken := os.Getenv("TELEGRAM_BOT_TOKEN")
 
 	if resendKey == "" {
 		log.Fatal("RESEND_API_KEY is required")
@@ -34,6 +35,14 @@ func main() {
 	}
 
 	resend := message.NewResendEmailSender(resendKey, resendFrom)
+
+	var tg *message.TelegramSender
+	if telegramToken != "" {
+		tg = message.NewTelegramSender(telegramToken)
+		log.Println("📨 Telegram notifications enabled")
+	} else {
+		log.Println("ℹ️  TELEGRAM_BOT_TOKEN not set — Telegram notifications disabled")
+	}
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -47,9 +56,20 @@ func main() {
 	// logs with "Group Coordinator Not Available" errors from that goroutine.
 	waitForGroupCoordinator(ctx, brokers)
 
-	go consumeTokenAlerts(ctx, brokers, resend)
-	go consumeDeFiAlerts(ctx, brokers, resend)
-	go consumePredictAlerts(ctx, brokers, resend)
+	// For any consumer group that has no committed offset (fresh deploy, first run,
+	// or after a coordinator failure that prevented committing), explicitly commit
+	// the earliest available offset so the group starts from the beginning.
+	// Groups that already have a committed offset are left completely untouched —
+	// no duplicate emails on normal restarts.
+	initConsumerGroupOffsets(ctx, brokers, []consumerSpec{
+		{"notification-service-token", message.TopicTokenAlert},
+		{"notification-service-defi", message.TopicDeFiAlert},
+		{"notification-service-predict", message.TopicPredictAlert},
+	})
+
+	go consumeTokenAlerts(ctx, brokers, resend, tg)
+	go consumeDeFiAlerts(ctx, brokers, resend, tg)
+	go consumePredictAlerts(ctx, brokers, resend, tg)
 
 	log.Printf("🔔 Notification service started. Listening on brokers: %v", brokers)
 	log.Println("Press Ctrl+C to stop...")
@@ -61,8 +81,8 @@ func main() {
 	log.Println("✅ Shutdown complete")
 }
 
-// consumeTokenAlerts reads from alerts.token and sends price alert emails.
-func consumeTokenAlerts(ctx context.Context, brokers []string, resend *message.ResendEmailSender) {
+// consumeTokenAlerts reads from alerts.token and sends price alert notifications.
+func consumeTokenAlerts(ctx context.Context, brokers []string, resend *message.ResendEmailSender, tg *message.TelegramSender) {
 	consumeWithBackoff(ctx, brokers, message.TopicTokenAlert, "notification-service-token",
 		func(ctx context.Context, r *kafka.Reader) error {
 			msg, err := r.FetchMessage(ctx)
@@ -78,8 +98,9 @@ func consumeTokenAlerts(ctx context.Context, brokers []string, resend *message.R
 			decision := &core.AlertDecision{
 				ShouldAlert: true,
 				Rule: &core.AlertRule{
-					Threshold: event.Threshold,
-					Direction: core.Direction(event.Direction),
+					Threshold:      event.Threshold,
+					Direction:      core.Direction(event.Direction),
+					TelegramChatID: event.TelegramChatID,
 				},
 				CurrentPrice: &price.PriceData{
 					Symbol:    event.Symbol,
@@ -88,10 +109,19 @@ func consumeTokenAlerts(ctx context.Context, brokers []string, resend *message.R
 				},
 				Message: event.Message,
 			}
-			if err := resend.SendAlert(event.RecipientEmail, decision); err != nil {
-				log.Printf("❌ [alerts.token] failed to send email to %s: %v", event.RecipientEmail, err)
-			} else {
-				log.Printf("✅ [alerts.token] sent alert for %s to %s", event.Symbol, event.RecipientEmail)
+			if event.RecipientEmail != "" {
+				if err := resend.SendAlert(event.RecipientEmail, decision); err != nil {
+					log.Printf("❌ [alerts.token] failed to send email to %s: %v", event.RecipientEmail, err)
+				} else {
+					log.Printf("✅ [alerts.token] sent email alert for %s to %s", event.Symbol, event.RecipientEmail)
+				}
+			}
+			if tg != nil && event.TelegramChatID != "" {
+				if err := tg.SendAlert(event.TelegramChatID, decision); err != nil {
+					log.Printf("❌ [alerts.token] failed to send Telegram to chat %s: %v", event.TelegramChatID, err)
+				} else {
+					log.Printf("✅ [alerts.token] sent Telegram alert for %s to chat %s", event.Symbol, event.TelegramChatID)
+				}
 			}
 			_ = r.CommitMessages(ctx, msg)
 			return nil
@@ -99,8 +129,8 @@ func consumeTokenAlerts(ctx context.Context, brokers []string, resend *message.R
 	)
 }
 
-// consumeDeFiAlerts reads from alerts.defi and sends DeFi alert emails.
-func consumeDeFiAlerts(ctx context.Context, brokers []string, resend *message.ResendEmailSender) {
+// consumeDeFiAlerts reads from alerts.defi and sends DeFi alert notifications.
+func consumeDeFiAlerts(ctx context.Context, brokers []string, resend *message.ResendEmailSender, tg *message.TelegramSender) {
 	consumeWithBackoff(ctx, brokers, message.TopicDeFiAlert, "notification-service-defi",
 		func(ctx context.Context, r *kafka.Reader) error {
 			msg, err := r.FetchMessage(ctx)
@@ -124,6 +154,7 @@ func consumeDeFiAlerts(ctx context.Context, brokers []string, resend *message.Re
 					Field:                   event.Field,
 					Threshold:               event.Threshold,
 					Direction:               core.Direction(event.Direction),
+					TelegramChatID:          event.TelegramChatID,
 					MarketTokenName:         event.MarketTokenName,
 					MarketTokenPair:         event.MarketTokenPair,
 					VaultName:               event.VaultName,
@@ -140,10 +171,19 @@ func consumeDeFiAlerts(ctx context.Context, brokers []string, resend *message.Re
 				ChainName:    event.ChainName,
 				Message:      event.Message,
 			}
-			if err := resend.SendDeFiAlert(event.RecipientEmail, decision); err != nil {
-				log.Printf("❌ [alerts.defi] failed to send email to %s: %v", event.RecipientEmail, err)
-			} else {
-				log.Printf("✅ [alerts.defi] sent alert for %s %s to %s", event.Protocol, event.Field, event.RecipientEmail)
+			if event.RecipientEmail != "" {
+				if err := resend.SendDeFiAlert(event.RecipientEmail, decision); err != nil {
+					log.Printf("❌ [alerts.defi] failed to send email to %s: %v", event.RecipientEmail, err)
+				} else {
+					log.Printf("✅ [alerts.defi] sent email alert for %s %s to %s", event.Protocol, event.Field, event.RecipientEmail)
+				}
+			}
+			if tg != nil && event.TelegramChatID != "" {
+				if err := tg.SendDeFiAlert(event.TelegramChatID, decision); err != nil {
+					log.Printf("❌ [alerts.defi] failed to send Telegram to chat %s: %v", event.TelegramChatID, err)
+				} else {
+					log.Printf("✅ [alerts.defi] sent Telegram alert for %s %s to chat %s", event.Protocol, event.Field, event.TelegramChatID)
+				}
 			}
 			_ = r.CommitMessages(ctx, msg)
 			return nil
@@ -151,8 +191,8 @@ func consumeDeFiAlerts(ctx context.Context, brokers []string, resend *message.Re
 	)
 }
 
-// consumePredictAlerts reads from alerts.predict and sends prediction market alert emails.
-func consumePredictAlerts(ctx context.Context, brokers []string, resend *message.ResendEmailSender) {
+// consumePredictAlerts reads from alerts.predict and sends prediction market alert notifications.
+func consumePredictAlerts(ctx context.Context, brokers []string, resend *message.ResendEmailSender, tg *message.TelegramSender) {
 	consumeWithBackoff(ctx, brokers, message.TopicPredictAlert, "notification-service-predict",
 		func(ctx context.Context, r *kafka.Reader) error {
 			msg, err := r.FetchMessage(ctx)
@@ -168,26 +208,36 @@ func consumePredictAlerts(ctx context.Context, brokers []string, resend *message
 			decision := &core.PredictMarketAlertDecision{
 				ShouldAlert: true,
 				Rule: &core.PredictMarketAlertRule{
-					PredictMarket: event.PredictMarket,
-					TokenID:       event.TokenID,
-					Field:         event.Field,
-					Threshold:     event.Threshold,
-					Direction:     core.Direction(event.Direction),
-					Question:      event.Question,
-					Outcome:       event.Outcome,
-					QuestionID:    event.QuestionID,
-					ConditionID:   event.ConditionID,
-					NegRisk:       event.NegRisk,
+					PredictMarket:  event.PredictMarket,
+					TokenID:        event.TokenID,
+					Field:          event.Field,
+					Threshold:      event.Threshold,
+					Direction:      core.Direction(event.Direction),
+					TelegramChatID: event.TelegramChatID,
+					Question:       event.Question,
+					Outcome:        event.Outcome,
+					QuestionID:     event.QuestionID,
+					ConditionID:    event.ConditionID,
+					NegRisk:        event.NegRisk,
 				},
 				CurrentMidpoint:  event.CurrentMidpoint,
 				CurrentBuyPrice:  event.CurrentBuyPrice,
 				CurrentSellPrice: event.CurrentSellPrice,
 				Message:          event.Message,
 			}
-			if err := resend.SendPredictMarketAlert(event.RecipientEmail, decision); err != nil {
-				log.Printf("❌ [alerts.predict] failed to send email to %s: %v", event.RecipientEmail, err)
-			} else {
-				log.Printf("✅ [alerts.predict] sent alert for %s to %s", event.Question, event.RecipientEmail)
+			if event.RecipientEmail != "" {
+				if err := resend.SendPredictMarketAlert(event.RecipientEmail, decision); err != nil {
+					log.Printf("❌ [alerts.predict] failed to send email to %s: %v", event.RecipientEmail, err)
+				} else {
+					log.Printf("✅ [alerts.predict] sent email alert for %s to %s", event.Question, event.RecipientEmail)
+				}
+			}
+			if tg != nil && event.TelegramChatID != "" {
+				if err := tg.SendPredictMarketAlert(event.TelegramChatID, decision); err != nil {
+					log.Printf("❌ [alerts.predict] failed to send Telegram to chat %s: %v", event.TelegramChatID, err)
+				} else {
+					log.Printf("✅ [alerts.predict] sent Telegram alert for %s to chat %s", event.Question, event.TelegramChatID)
+				}
 			}
 			_ = r.CommitMessages(ctx, msg)
 			return nil
@@ -240,6 +290,74 @@ func consumeWithBackoff(
 			}
 			backoff = backoffMin // reset on successful message
 		}
+	}
+}
+
+type consumerSpec struct {
+	groupID string
+	topic   string
+}
+
+// initConsumerGroupOffsets ensures every consumer group starts from the earliest
+// available message when no committed offset exists. On normal restarts the group
+// already has a committed offset, so this function is a no-op and duplicate emails
+// are never sent.
+func initConsumerGroupOffsets(ctx context.Context, brokers []string, specs []consumerSpec) {
+	if len(brokers) == 0 {
+		return
+	}
+	client := &kafka.Client{
+		Addr:    kafka.TCP(brokers[0]),
+		Timeout: 10 * time.Second,
+	}
+	for _, spec := range specs {
+		// Check whether the group already has a committed offset for partition 0.
+		fetchResp, err := client.OffsetFetch(ctx, &kafka.OffsetFetchRequest{
+			GroupID: spec.groupID,
+			Topics:  map[string][]int{spec.topic: {0}},
+		})
+		if err != nil {
+			log.Printf("⚠️  [%s] offset check failed: %v", spec.groupID, err)
+			continue
+		}
+		partitions := fetchResp.Topics[spec.topic]
+		if len(partitions) == 0 {
+			continue
+		}
+		p := partitions[0]
+		if p.Error != nil || p.CommittedOffset >= 0 {
+			// Already has a valid committed offset — leave it alone.
+			if p.CommittedOffset >= 0 {
+				log.Printf("📌 [%s/%s] committed offset=%d, resuming from there", spec.groupID, spec.topic, p.CommittedOffset)
+			}
+			continue
+		}
+
+		// No committed offset: dial the partition leader and read the earliest offset.
+		conn, err := kafka.DialLeader(ctx, "tcp", brokers[0], spec.topic, 0)
+		if err != nil {
+			log.Printf("⚠️  [%s] dial leader error: %v", spec.groupID, err)
+			continue
+		}
+		first, _, err := conn.ReadOffsets()
+		conn.Close()
+		if err != nil {
+			log.Printf("⚠️  [%s] read offsets error: %v", spec.groupID, err)
+			continue
+		}
+
+		// Commit the earliest offset so kafka-go starts consuming from there.
+		if _, err = client.OffsetCommit(ctx, &kafka.OffsetCommitRequest{
+			GroupID:      spec.groupID,
+			GenerationID: -1, // -1 = standalone commit outside an active group session
+			Topics: map[string][]kafka.OffsetCommit{
+				spec.topic: {{Partition: 0, Offset: first}},
+			},
+		}); err != nil {
+			log.Printf("⚠️  [%s] offset init failed: %v", spec.groupID, err)
+			continue
+		}
+		log.Printf("📌 [%s/%s] no prior offset found, initialized to %d (earliest)", spec.groupID, spec.topic, first)
 	}
 }
 

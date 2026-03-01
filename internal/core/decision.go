@@ -37,15 +37,16 @@ type Frequency struct {
 
 // AlertRule defines a price alert rule
 type AlertRule struct {
-	ID             int64 // MySQL row ID — used for hot-swap matching
-	Symbol         string
-	PriceFeedID    string // Pyth price feed ID for this symbol
-	Threshold      float64
-	Direction      Direction // >=, >, =, <=, <
-	Enabled        bool
-	RecipientEmail string // Email address to send alerts to
-	LastTriggered  *time.Time
-	Frequency      *Frequency // Optional frequency configuration
+	ID               int64 // MySQL row ID — used for hot-swap matching
+	Symbol           string
+	PriceFeedID      string // Pyth price feed ID for this symbol
+	Threshold        float64
+	Direction        Direction // >=, >, =, <=, <
+	Enabled          bool
+	RecipientEmail   string // Email address to send alerts to
+	TelegramChatID   string // Optional Telegram chat ID for notifications
+	LastTriggered    *time.Time
+	Frequency        *Frequency // Optional frequency configuration
 }
 
 // DeFiAlertRule defines a DeFi protocol alert rule
@@ -61,6 +62,7 @@ type DeFiAlertRule struct {
 	Direction               Direction // >=, >, =, <=, <
 	Enabled                 bool
 	RecipientEmail          string
+	TelegramChatID          string // Optional Telegram chat ID for notifications
 	LastTriggered           *time.Time
 	Frequency               *Frequency
 	// Display names (optional, for better logging/alert messages)
@@ -104,10 +106,11 @@ type PredictMarketAlertRule struct {
 	Field          string     // "MIDPOINT"
 	Threshold      float64
 	Direction      Direction
-	Enabled        bool
-	RecipientEmail string
-	LastTriggered  *time.Time
-	Frequency      *Frequency
+	Enabled          bool
+	RecipientEmail   string
+	TelegramChatID   string // Optional Telegram chat ID for notifications
+	LastTriggered    *time.Time
+	Frequency        *Frequency
 	// Display context (populated from params)
 	NegRisk     bool
 	QuestionID  string

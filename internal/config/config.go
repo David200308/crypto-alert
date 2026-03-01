@@ -80,13 +80,14 @@ type FrequencyConfig struct {
 
 // AlertRuleConfig represents a price alert rule in JSON format
 type AlertRuleConfig struct {
-	Symbol         string           `json:"symbol,omitempty"`
-	PriceFeedID    string           `json:"price_feed_id,omitempty"` // Pyth price feed ID for this symbol
-	Threshold      float64          `json:"threshold"`
-	Direction      string           `json:"direction"` // ">=", ">", "=", "<=", "<"
-	Enabled        bool             `json:"enabled"`
-	RecipientEmail string           `json:"recipient_email"`     // Email address to send alerts to
-	Frequency      *FrequencyConfig `json:"frequency,omitempty"` // Optional frequency configuration
+	Symbol           string           `json:"symbol,omitempty"`
+	PriceFeedID      string           `json:"price_feed_id,omitempty"` // Pyth price feed ID for this symbol
+	Threshold        float64          `json:"threshold"`
+	Direction        string           `json:"direction"` // ">=", ">", "=", "<=", "<"
+	Enabled          bool             `json:"enabled"`
+	RecipientEmail   string           `json:"recipient_email"`           // Email address to send alerts to
+	TelegramChatID   string           `json:"telegram_chat_id,omitempty"` // Optional Telegram chat ID
+	Frequency        *FrequencyConfig `json:"frequency,omitempty"`       // Optional frequency configuration
 }
 
 // DeFiAlertRuleParams holds protocol-specific parameters nested under "params" in JSON
@@ -111,17 +112,18 @@ type DeFiAlertRuleParams struct {
 
 // DeFiAlertRuleConfig represents a DeFi protocol alert rule in JSON format
 type DeFiAlertRuleConfig struct {
-	Protocol       string              `json:"protocol"`           // e.g., "aave", "morpho"
-	Category       string              `json:"category,omitempty"` // "market" or "vault" (for Morpho)
-	Version        string              `json:"version"`            // e.g., "v3", "v1"
-	ChainID        string              `json:"chain_id"`           // Chain ID: "1", "8453", "42161"
-	Field          string              `json:"field"`              // "TVL", "APY", "UTILIZATION", "LIQUIDITY"
-	Threshold      float64             `json:"threshold"`
-	Direction      string              `json:"direction"` // ">=", ">", "=", "<=", "<"
-	Enabled        bool                `json:"enabled"`
-	RecipientEmail string              `json:"recipient_email"`     // Email address to send alerts to
-	Frequency      *FrequencyConfig    `json:"frequency,omitempty"` // Optional frequency configuration
-	Params         DeFiAlertRuleParams `json:"params"`              // Protocol-specific parameters
+	Protocol         string              `json:"protocol"`           // e.g., "aave", "morpho"
+	Category         string              `json:"category,omitempty"` // "market" or "vault" (for Morpho)
+	Version          string              `json:"version"`            // e.g., "v3", "v1"
+	ChainID          string              `json:"chain_id"`           // Chain ID: "1", "8453", "42161"
+	Field            string              `json:"field"`              // "TVL", "APY", "UTILIZATION", "LIQUIDITY"
+	Threshold        float64             `json:"threshold"`
+	Direction        string              `json:"direction"` // ">=", ">", "=", "<=", "<"
+	Enabled          bool                `json:"enabled"`
+	RecipientEmail   string              `json:"recipient_email"`            // Email address to send alerts to
+	TelegramChatID   string              `json:"telegram_chat_id,omitempty"` // Optional Telegram chat ID
+	Frequency        *FrequencyConfig    `json:"frequency,omitempty"`        // Optional frequency configuration
+	Params           DeFiAlertRuleParams `json:"params"`                     // Protocol-specific parameters
 }
 
 // PredictMarketAlertRuleParams holds prediction market-specific parameters stored in the params JSON column.
@@ -138,12 +140,13 @@ type PredictMarketAlertRuleParams struct {
 type PredictMarketAlertRuleConfig struct {
 	PredictMarket  string                       `json:"predict_market"`
 	Params         PredictMarketAlertRuleParams `json:"params"`
-	Field          string                       `json:"field"`           // "MIDPOINT"
+	Field          string                       `json:"field"`                      // "MIDPOINT"
 	Threshold      float64                      `json:"threshold"`
-	Direction      string                       `json:"direction"`       // ">=", ">", "=", "<=", "<"
+	Direction      string                       `json:"direction"`                  // ">=", ">", "=", "<=", "<"
 	Enabled        bool                         `json:"enabled"`
 	Frequency      *FrequencyConfig             `json:"frequency,omitempty"`
 	RecipientEmail string                       `json:"recipient_email"`
+	TelegramChatID string                       `json:"telegram_chat_id,omitempty"` // Optional Telegram chat ID
 }
 
 // ParsePredictMarketRule converts PredictMarketAlertRuleConfig to core.PredictMarketAlertRule.
@@ -176,9 +179,6 @@ func ParsePredictMarketRule(rc PredictMarketAlertRuleConfig) (*core.PredictMarke
 	if rc.Threshold < 0 {
 		return nil, fmt.Errorf("threshold must be non-negative for predict market rule")
 	}
-	if rc.RecipientEmail == "" {
-		return nil, fmt.Errorf("recipient_email is required for predict market rule")
-	}
 
 	var frequency *core.Frequency
 	if rc.Frequency != nil {
@@ -206,6 +206,7 @@ func ParsePredictMarketRule(rc PredictMarketAlertRuleConfig) (*core.PredictMarke
 		Direction:      direction,
 		Enabled:        rc.Enabled,
 		RecipientEmail: rc.RecipientEmail,
+		TelegramChatID: rc.TelegramChatID,
 		Frequency:      frequency,
 		NegRisk:        rc.Params.NegRisk,
 		QuestionID:     rc.Params.QuestionID,
@@ -242,11 +243,6 @@ func ParsePriceRule(rc AlertRuleConfig) (*core.AlertRule, error) {
 	// Validate threshold
 	if rc.Threshold <= 0 {
 		return nil, fmt.Errorf("threshold must be positive for symbol %s", rc.Symbol)
-	}
-
-	// Validate recipient email
-	if rc.RecipientEmail == "" {
-		return nil, fmt.Errorf("recipient_email is required for symbol %s", rc.Symbol)
 	}
 
 	// Validate price feed ID
@@ -286,6 +282,7 @@ func ParsePriceRule(rc AlertRuleConfig) (*core.AlertRule, error) {
 		Direction:      direction,
 		Enabled:        rc.Enabled,
 		RecipientEmail: rc.RecipientEmail,
+		TelegramChatID: rc.TelegramChatID,
 		Frequency:      frequency,
 	}, nil
 }
@@ -385,11 +382,6 @@ func ParseDeFiRule(rc DeFiAlertRuleConfig) (*core.DeFiAlertRule, error) {
 		return nil, fmt.Errorf("threshold must be non-negative for protocol %s %s", rc.Protocol, rc.Version)
 	}
 
-	// Validate recipient email
-	if rc.RecipientEmail == "" {
-		return nil, fmt.Errorf("recipient_email is required for protocol %s %s", rc.Protocol, rc.Version)
-	}
-
 	// Validate frequency configuration
 	var frequency *core.Frequency
 	if rc.Frequency != nil {
@@ -426,6 +418,7 @@ func ParseDeFiRule(rc DeFiAlertRuleConfig) (*core.DeFiAlertRule, error) {
 		Direction:           direction,
 		Enabled:             rc.Enabled,
 		RecipientEmail:      rc.RecipientEmail,
+		TelegramChatID:      rc.TelegramChatID,
 		Frequency:           frequency,
 		// Display names (from params)
 		MarketTokenName: rc.Params.MarketTokenName,

@@ -11,18 +11,20 @@ const (
 
 // TokenAlertEvent is the Kafka message payload for a price (token) alert.
 type TokenAlertEvent struct {
-	RecipientEmail string    `json:"recipient_email"`
-	Symbol         string    `json:"symbol"`
-	Price          float64   `json:"price"`
-	Threshold      float64   `json:"threshold"`
-	Direction      string    `json:"direction"`
-	Timestamp      time.Time `json:"timestamp"`
-	Message        string    `json:"message"`
+	RecipientEmail   string    `json:"recipient_email"`
+	TelegramChatID   string    `json:"telegram_chat_id,omitempty"`
+	Symbol           string    `json:"symbol"`
+	Price            float64   `json:"price"`
+	Threshold        float64   `json:"threshold"`
+	Direction        string    `json:"direction"`
+	Timestamp        time.Time `json:"timestamp"`
+	Message          string    `json:"message"`
 }
 
 // DeFiAlertEvent is the Kafka message payload for a DeFi protocol alert.
 type DeFiAlertEvent struct {
 	RecipientEmail string `json:"recipient_email"`
+	TelegramChatID string `json:"telegram_chat_id,omitempty"`
 	// Rule identity
 	Protocol  string `json:"protocol"`
 	Category  string `json:"category"`
@@ -54,6 +56,7 @@ type DeFiAlertEvent struct {
 // PredictMarketAlertEvent is the Kafka message payload for a prediction market alert.
 type PredictMarketAlertEvent struct {
 	RecipientEmail   string  `json:"recipient_email"`
+	TelegramChatID   string  `json:"telegram_chat_id,omitempty"`
 	PredictMarket    string  `json:"predict_market"`
 	TokenID          string  `json:"token_id"`
 	Field            string  `json:"field"`

@@ -68,7 +68,7 @@ func LoadPredictMarketRulesFromMySQL(dsn string) ([]*core.PredictMarketAlertRule
 }
 
 func loadPredictMarketRules(db *sql.DB) ([]*core.PredictMarketAlertRule, error) {
-	query := `SELECT id, predict_market, params, field, threshold, direction, enabled, frequency, recipient_email FROM ` + predictMarketTable
+	query := `SELECT id, predict_market, params, field, threshold, direction, enabled, frequency, COALESCE(recipient_email, ''), COALESCE(telegram_chat_id, '') FROM ` + predictMarketTable
 	rows, err := db.Query(query)
 	if err != nil {
 		return nil, err
@@ -78,12 +78,12 @@ func loadPredictMarketRules(db *sql.DB) ([]*core.PredictMarketAlertRule, error) 
 	var rules []*core.PredictMarketAlertRule
 	for rows.Next() {
 		var id int64
-		var predictMarket, field, direction, recipientEmail string
+		var predictMarket, field, direction, recipientEmail, telegramChatID string
 		var threshold float64
 		var enabled bool
 		var paramsJSON, frequencyJSON []byte
 
-		if err := rows.Scan(&id, &predictMarket, &paramsJSON, &field, &threshold, &direction, &enabled, &frequencyJSON, &recipientEmail); err != nil {
+		if err := rows.Scan(&id, &predictMarket, &paramsJSON, &field, &threshold, &direction, &enabled, &frequencyJSON, &recipientEmail, &telegramChatID); err != nil {
 			return nil, err
 		}
 
@@ -102,6 +102,7 @@ func loadPredictMarketRules(db *sql.DB) ([]*core.PredictMarketAlertRule, error) 
 			Direction:      direction,
 			Enabled:        enabled,
 			RecipientEmail: recipientEmail,
+			TelegramChatID: telegramChatID,
 		}
 		if len(frequencyJSON) > 0 {
 			var freq config.FrequencyConfig
@@ -122,7 +123,7 @@ func loadPredictMarketRules(db *sql.DB) ([]*core.PredictMarketAlertRule, error) 
 }
 
 func loadTokenRules(db *sql.DB) ([]*core.AlertRule, error) {
-	query := `SELECT id, symbol, price_feed_id, threshold, direction, enabled, frequency, recipient_email FROM ` + tokenTable
+	query := `SELECT id, symbol, price_feed_id, threshold, direction, enabled, frequency, COALESCE(recipient_email, ''), COALESCE(telegram_chat_id, '') FROM ` + tokenTable
 	rows, err := db.Query(query)
 	if err != nil {
 		return nil, err
@@ -132,12 +133,12 @@ func loadTokenRules(db *sql.DB) ([]*core.AlertRule, error) {
 	var rules []*core.AlertRule
 	for rows.Next() {
 		var id int64
-		var symbol, priceFeedID, direction, recipientEmail string
+		var symbol, priceFeedID, direction, recipientEmail, telegramChatID string
 		var threshold float64
 		var enabled bool
 		var frequencyJSON []byte
 
-		if err := rows.Scan(&id, &symbol, &priceFeedID, &threshold, &direction, &enabled, &frequencyJSON, &recipientEmail); err != nil {
+		if err := rows.Scan(&id, &symbol, &priceFeedID, &threshold, &direction, &enabled, &frequencyJSON, &recipientEmail, &telegramChatID); err != nil {
 			return nil, err
 		}
 
@@ -148,6 +149,7 @@ func loadTokenRules(db *sql.DB) ([]*core.AlertRule, error) {
 			Direction:      direction,
 			Enabled:        enabled,
 			RecipientEmail: recipientEmail,
+			TelegramChatID: telegramChatID,
 		}
 		if len(frequencyJSON) > 0 {
 			var freq config.FrequencyConfig
@@ -168,7 +170,7 @@ func loadTokenRules(db *sql.DB) ([]*core.AlertRule, error) {
 }
 
 func loadDeFiRules(db *sql.DB) ([]*core.DeFiAlertRule, error) {
-	query := `SELECT id, protocol, version, chain_id, params, field, threshold, direction, enabled, frequency, recipient_email FROM ` + defiTable
+	query := `SELECT id, protocol, version, chain_id, params, field, threshold, direction, enabled, frequency, COALESCE(recipient_email, ''), COALESCE(telegram_chat_id, '') FROM ` + defiTable
 	rows, err := db.Query(query)
 	if err != nil {
 		return nil, err
@@ -178,12 +180,12 @@ func loadDeFiRules(db *sql.DB) ([]*core.DeFiAlertRule, error) {
 	var rules []*core.DeFiAlertRule
 	for rows.Next() {
 		var id int64
-		var protocol, version, chainID, field, direction, recipientEmail string
+		var protocol, version, chainID, field, direction, recipientEmail, telegramChatID string
 		var threshold float64
 		var enabled bool
 		var paramsJSON, frequencyJSON []byte
 
-		if err := rows.Scan(&id, &protocol, &version, &chainID, &paramsJSON, &field, &threshold, &direction, &enabled, &frequencyJSON, &recipientEmail); err != nil {
+		if err := rows.Scan(&id, &protocol, &version, &chainID, &paramsJSON, &field, &threshold, &direction, &enabled, &frequencyJSON, &recipientEmail, &telegramChatID); err != nil {
 			return nil, err
 		}
 
@@ -215,6 +217,7 @@ func loadDeFiRules(db *sql.DB) ([]*core.DeFiAlertRule, error) {
 			Direction:      direction,
 			Enabled:        enabled,
 			RecipientEmail: recipientEmail,
+			TelegramChatID: telegramChatID,
 			Params:         params,
 		}
 		if len(frequencyJSON) > 0 {

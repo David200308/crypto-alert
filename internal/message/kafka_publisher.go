@@ -50,6 +50,7 @@ func (p *KafkaAlertPublisher) SendToEmail(_, _, _ string) error {
 func (p *KafkaAlertPublisher) SendAlert(toEmail string, decision *core.AlertDecision) error {
 	event := TokenAlertEvent{
 		RecipientEmail: toEmail,
+		TelegramChatID: decision.Rule.TelegramChatID,
 		Symbol:         decision.CurrentPrice.Symbol,
 		Price:          decision.CurrentPrice.Price,
 		Timestamp:      decision.CurrentPrice.Timestamp,
@@ -65,6 +66,7 @@ func (p *KafkaAlertPublisher) SendDeFiAlert(toEmail string, decision *core.DeFiA
 	r := decision.Rule
 	event := DeFiAlertEvent{
 		RecipientEmail:          toEmail,
+		TelegramChatID:          r.TelegramChatID,
 		Protocol:                r.Protocol,
 		Category:                r.Category,
 		Version:                 r.Version,
@@ -96,6 +98,7 @@ func (p *KafkaAlertPublisher) SendPredictMarketAlert(toEmail string, decision *c
 	r := decision.Rule
 	event := PredictMarketAlertEvent{
 		RecipientEmail:   toEmail,
+		TelegramChatID:   r.TelegramChatID,
 		PredictMarket:    r.PredictMarket,
 		TokenID:          r.TokenID,
 		Field:            r.Field,

@@ -10,7 +10,8 @@ CREATE TABLE IF NOT EXISTS alert_rule_token_config (
   direction        VARCHAR(8) NOT NULL,
   enabled          BOOLEAN NOT NULL DEFAULT true,
   frequency        JSON,
-  recipient_email  VARCHAR(255) NOT NULL
+  recipient_email  VARCHAR(255) DEFAULT NULL,
+  telegram_chat_id VARCHAR(64) DEFAULT NULL
 );
 
 -- DeFi alert rules (params and frequency stored as JSON)
@@ -25,7 +26,8 @@ CREATE TABLE IF NOT EXISTS alert_rule_defi_config (
   direction        VARCHAR(8) NOT NULL,
   enabled          BOOLEAN NOT NULL DEFAULT true,
   frequency        JSON,
-  recipient_email  VARCHAR(255) NOT NULL
+  recipient_email  VARCHAR(255) DEFAULT NULL,
+  telegram_chat_id VARCHAR(64) DEFAULT NULL
 );
 
 -- Prediction market alert rules (e.g., Polymarket)
@@ -41,5 +43,6 @@ CREATE TABLE IF NOT EXISTS alert_rule_predict_market_config (
   direction        VARCHAR(8) NOT NULL,
   enabled          BOOLEAN NOT NULL DEFAULT true,
   frequency        JSON,
-  recipient_email  VARCHAR(255) NOT NULL
+  recipient_email  VARCHAR(255) DEFAULT NULL,
+  telegram_chat_id VARCHAR(64) DEFAULT NULL
 );

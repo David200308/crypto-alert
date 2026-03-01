@@ -63,9 +63,14 @@ func main() {
 		}
 	}
 
-	// Setup routes with CORS (data from files and/or Elasticsearch)
+	// Setup routes with CORS (data from files and/or Elasticsearch).
+	// More-specific prefixes must be registered before the catch-all /api/logs/.
 	http.HandleFunc("/api/logs/dates", corsHandler(func(w http.ResponseWriter, r *http.Request) {
 		handleGetDates(w, r, logDir, esLog)
+	}))
+
+	http.HandleFunc("/api/logs/checkpoint/", corsHandler(func(w http.ResponseWriter, r *http.Request) {
+		handleGetCheckpoint(w, r, logDir, esLog)
 	}))
 
 	http.HandleFunc("/api/logs/", corsHandler(func(w http.ResponseWriter, r *http.Request) {
@@ -139,6 +144,53 @@ func handleGetDates(w http.ResponseWriter, r *http.Request, logDir string, esLog
 	json.NewEncoder(w).Encode(dates)
 }
 
+// handleGetCheckpoint returns the RFC3339 timestamp of the most recent log entry for a given date.
+// Route: GET /api/logs/checkpoint/{yyyyMMdd}
+// Response: { "checkpoint": "<RFC3339 or empty string>" }
+func handleGetCheckpoint(w http.ResponseWriter, r *http.Request, logDir string, esLog *store.ESClient) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	dateStr := strings.TrimPrefix(r.URL.Path, "/api/logs/checkpoint/")
+	if len(dateStr) != 8 {
+		http.Error(w, "Invalid date format. Expected yyyyMMdd", http.StatusBadRequest)
+		return
+	}
+	if _, err := time.Parse("20060102", dateStr); err != nil {
+		http.Error(w, "Invalid date format. Expected yyyyMMdd", http.StatusBadRequest)
+		return
+	}
+
+	var checkpoint string
+
+	// Prefer Elasticsearch
+	if esLog != nil {
+		cp, err := esLog.GetCheckpoint(r.Context(), dateStr)
+		if err != nil {
+			log.Printf("ES GetCheckpoint error: %v", err)
+		} else {
+			checkpoint = cp
+		}
+	}
+
+	// Fall back to log file
+	if checkpoint == "" {
+		logFile := filepath.Join(logDir, fmt.Sprintf("%s.log", dateStr))
+		if content, err := os.ReadFile(logFile); err == nil {
+			checkpoint = store.GetCheckpointFromFile(string(content))
+		}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"checkpoint": checkpoint})
+}
+
+// handleGetLogs returns log entries for a given date.
+// Route: GET /api/logs/{yyyyMMdd}[?since=<RFC3339>&q=<search>]
+//   - since: when provided, returns only entries strictly after that timestamp (checkpoint diff)
+//   - q:     optional message content filter
 func handleGetLogs(w http.ResponseWriter, r *http.Request, logDir string, esLog *store.ESClient) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -159,28 +211,38 @@ func handleGetLogs(w http.ResponseWriter, r *http.Request, logDir string, esLog 
 		return
 	}
 
-	after := strings.TrimSpace(r.URL.Query().Get("after")) // cursor: only return logs after this timestamp (RFC3339)
-	searchQ := strings.TrimSpace(r.URL.Query().Get("q"))   // search: filter by message content (backend-side)
+	since := strings.TrimSpace(r.URL.Query().Get("since")) // incremental: only return logs after this checkpoint
+	searchQ := strings.TrimSpace(r.URL.Query().Get("q"))   // optional message content filter
 
 	var entries []store.LogEntry
-	var nextCursor string
 
 	// Prefer Elasticsearch when available
 	if esLog != nil {
-		ents, cursor, err := esLog.GetLogsForDate(r.Context(), path, after, searchQ)
+		var (
+			ents []store.LogEntry
+			err  error
+		)
+		if since != "" {
+			ents, err = esLog.GetLogsSince(r.Context(), path, since, searchQ)
+		} else {
+			ents, err = esLog.GetLogsForDate(r.Context(), path, searchQ)
+		}
 		if err != nil {
-			log.Printf("ES GetLogsForDate error: %v", err)
+			log.Printf("ES GetLogs error: %v", err)
 		} else if len(ents) > 0 {
 			entries = ents
-			nextCursor = cursor
 		}
 	}
 
-	// Fall back to file when no ES data
+	// Fall back to log file when no ES data
 	if len(entries) == 0 {
 		logFile := filepath.Join(logDir, fmt.Sprintf("%s.log", path))
 		if content, err := os.ReadFile(logFile); err == nil {
-			entries, nextCursor = store.GetLogsFromFile(string(content), after, searchQ)
+			if since != "" {
+				entries = store.GetLogsFromFileSince(string(content), since, searchQ)
+			} else {
+				entries = store.GetLogsFromFile(string(content), searchQ)
+			}
 		}
 	}
 
@@ -191,7 +253,6 @@ func handleGetLogs(w http.ResponseWriter, r *http.Request, logDir string, esLog 
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
-		"logs":       entries,
-		"nextCursor": nextCursor,
+		"logs": entries,
 	})
 }

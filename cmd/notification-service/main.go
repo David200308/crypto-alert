@@ -57,160 +57,183 @@ func main() {
 
 // consumeTokenAlerts reads from alerts.token and sends price alert emails.
 func consumeTokenAlerts(ctx context.Context, brokers []string, resend *message.ResendEmailSender) {
-	r := newReader(brokers, message.TopicTokenAlert, "notification-service-token")
-	defer r.Close()
-	log.Printf("🔄 [alerts.token] consumer goroutine started, waiting for messages...")
-
-	for {
-		msg, err := r.FetchMessage(ctx)
-		if err != nil {
-			if ctx.Err() != nil {
-				return
+	consumeWithBackoff(ctx, brokers, message.TopicTokenAlert, "notification-service-token",
+		func(ctx context.Context, r *kafka.Reader) error {
+			msg, err := r.FetchMessage(ctx)
+			if err != nil {
+				return err
 			}
-			log.Printf("⚠️  [alerts.token] read error: %v", err)
-			continue
-		}
-
-		var event message.TokenAlertEvent
-		if err := json.Unmarshal(msg.Value, &event); err != nil {
-			log.Printf("⚠️  [alerts.token] unmarshal error: %v", err)
+			var event message.TokenAlertEvent
+			if err := json.Unmarshal(msg.Value, &event); err != nil {
+				log.Printf("⚠️  [alerts.token] unmarshal error: %v", err)
+				_ = r.CommitMessages(ctx, msg)
+				return nil
+			}
+			decision := &core.AlertDecision{
+				ShouldAlert: true,
+				Rule: &core.AlertRule{
+					Threshold: event.Threshold,
+					Direction: core.Direction(event.Direction),
+				},
+				CurrentPrice: &price.PriceData{
+					Symbol:    event.Symbol,
+					Price:     event.Price,
+					Timestamp: event.Timestamp,
+				},
+				Message: event.Message,
+			}
+			if err := resend.SendAlert(event.RecipientEmail, decision); err != nil {
+				log.Printf("❌ [alerts.token] failed to send email to %s: %v", event.RecipientEmail, err)
+			} else {
+				log.Printf("✅ [alerts.token] sent alert for %s to %s", event.Symbol, event.RecipientEmail)
+			}
 			_ = r.CommitMessages(ctx, msg)
-			continue
-		}
-
-		decision := &core.AlertDecision{
-			ShouldAlert: true,
-			Rule: &core.AlertRule{
-				Threshold: event.Threshold,
-				Direction: core.Direction(event.Direction),
-			},
-			CurrentPrice: &price.PriceData{
-				Symbol:    event.Symbol,
-				Price:     event.Price,
-				Timestamp: event.Timestamp,
-			},
-			Message: event.Message,
-		}
-
-		if err := resend.SendAlert(event.RecipientEmail, decision); err != nil {
-			log.Printf("❌ [alerts.token] failed to send email to %s: %v", event.RecipientEmail, err)
-		} else {
-			log.Printf("✅ [alerts.token] sent alert for %s to %s", event.Symbol, event.RecipientEmail)
-		}
-		// Commit after send attempt (success or permanent failure); retried on restart otherwise
-		_ = r.CommitMessages(ctx, msg)
-	}
+			return nil
+		},
+	)
 }
 
 // consumeDeFiAlerts reads from alerts.defi and sends DeFi alert emails.
 func consumeDeFiAlerts(ctx context.Context, brokers []string, resend *message.ResendEmailSender) {
-	r := newReader(brokers, message.TopicDeFiAlert, "notification-service-defi")
-	defer r.Close()
-	log.Printf("🔄 [alerts.defi] consumer goroutine started, waiting for messages...")
-
-	for {
-		msg, err := r.FetchMessage(ctx)
-		if err != nil {
-			if ctx.Err() != nil {
-				return
+	consumeWithBackoff(ctx, brokers, message.TopicDeFiAlert, "notification-service-defi",
+		func(ctx context.Context, r *kafka.Reader) error {
+			msg, err := r.FetchMessage(ctx)
+			if err != nil {
+				return err
 			}
-			log.Printf("⚠️  [alerts.defi] read error: %v", err)
-			continue
-		}
-
-		var event message.DeFiAlertEvent
-		if err := json.Unmarshal(msg.Value, &event); err != nil {
-			log.Printf("⚠️  [alerts.defi] unmarshal error: %v", err)
+			var event message.DeFiAlertEvent
+			if err := json.Unmarshal(msg.Value, &event); err != nil {
+				log.Printf("⚠️  [alerts.defi] unmarshal error: %v", err)
+				_ = r.CommitMessages(ctx, msg)
+				return nil
+			}
+			decision := &core.DeFiAlertDecision{
+				ShouldAlert: true,
+				Rule: &core.DeFiAlertRule{
+					Protocol:                event.Protocol,
+					Category:                event.Category,
+					Version:                 event.Version,
+					ChainID:                 event.ChainID,
+					MarketTokenContract:     event.MarketTokenContract,
+					Field:                   event.Field,
+					Threshold:               event.Threshold,
+					Direction:               core.Direction(event.Direction),
+					MarketTokenName:         event.MarketTokenName,
+					MarketTokenPair:         event.MarketTokenPair,
+					VaultName:               event.VaultName,
+					BorrowTokenContract:     event.BorrowTokenContract,
+					CollateralTokenContract: event.CollateralTokenContract,
+					OracleAddress:           event.OracleAddress,
+					IRMAddress:              event.IRMAddress,
+					LLTV:                    event.LLTV,
+					MarketContractAddress:   event.MarketContractAddress,
+					VaultTokenAddress:       event.VaultTokenAddress,
+					DepositTokenContract:    event.DepositTokenContract,
+				},
+				CurrentValue: event.CurrentValue,
+				ChainName:    event.ChainName,
+				Message:      event.Message,
+			}
+			if err := resend.SendDeFiAlert(event.RecipientEmail, decision); err != nil {
+				log.Printf("❌ [alerts.defi] failed to send email to %s: %v", event.RecipientEmail, err)
+			} else {
+				log.Printf("✅ [alerts.defi] sent alert for %s %s to %s", event.Protocol, event.Field, event.RecipientEmail)
+			}
 			_ = r.CommitMessages(ctx, msg)
-			continue
-		}
-
-		decision := &core.DeFiAlertDecision{
-			ShouldAlert: true,
-			Rule: &core.DeFiAlertRule{
-				Protocol:                event.Protocol,
-				Category:                event.Category,
-				Version:                 event.Version,
-				ChainID:                 event.ChainID,
-				MarketTokenContract:     event.MarketTokenContract,
-				Field:                   event.Field,
-				Threshold:               event.Threshold,
-				Direction:               core.Direction(event.Direction),
-				MarketTokenName:         event.MarketTokenName,
-				MarketTokenPair:         event.MarketTokenPair,
-				VaultName:               event.VaultName,
-				BorrowTokenContract:     event.BorrowTokenContract,
-				CollateralTokenContract: event.CollateralTokenContract,
-				OracleAddress:           event.OracleAddress,
-				IRMAddress:              event.IRMAddress,
-				LLTV:                    event.LLTV,
-				MarketContractAddress:   event.MarketContractAddress,
-				VaultTokenAddress:       event.VaultTokenAddress,
-				DepositTokenContract:    event.DepositTokenContract,
-			},
-			CurrentValue: event.CurrentValue,
-			ChainName:    event.ChainName,
-			Message:      event.Message,
-		}
-
-		if err := resend.SendDeFiAlert(event.RecipientEmail, decision); err != nil {
-			log.Printf("❌ [alerts.defi] failed to send email to %s: %v", event.RecipientEmail, err)
-		} else {
-			log.Printf("✅ [alerts.defi] sent alert for %s %s to %s", event.Protocol, event.Field, event.RecipientEmail)
-		}
-		_ = r.CommitMessages(ctx, msg)
-	}
+			return nil
+		},
+	)
 }
 
 // consumePredictAlerts reads from alerts.predict and sends prediction market alert emails.
 func consumePredictAlerts(ctx context.Context, brokers []string, resend *message.ResendEmailSender) {
-	r := newReader(brokers, message.TopicPredictAlert, "notification-service-predict")
-	defer r.Close()
-	log.Printf("🔄 [alerts.predict] consumer goroutine started, waiting for messages...")
+	consumeWithBackoff(ctx, brokers, message.TopicPredictAlert, "notification-service-predict",
+		func(ctx context.Context, r *kafka.Reader) error {
+			msg, err := r.FetchMessage(ctx)
+			if err != nil {
+				return err
+			}
+			var event message.PredictMarketAlertEvent
+			if err := json.Unmarshal(msg.Value, &event); err != nil {
+				log.Printf("⚠️  [alerts.predict] unmarshal error: %v", err)
+				_ = r.CommitMessages(ctx, msg)
+				return nil
+			}
+			decision := &core.PredictMarketAlertDecision{
+				ShouldAlert: true,
+				Rule: &core.PredictMarketAlertRule{
+					PredictMarket: event.PredictMarket,
+					TokenID:       event.TokenID,
+					Field:         event.Field,
+					Threshold:     event.Threshold,
+					Direction:     core.Direction(event.Direction),
+					Question:      event.Question,
+					Outcome:       event.Outcome,
+					QuestionID:    event.QuestionID,
+					ConditionID:   event.ConditionID,
+					NegRisk:       event.NegRisk,
+				},
+				CurrentMidpoint:  event.CurrentMidpoint,
+				CurrentBuyPrice:  event.CurrentBuyPrice,
+				CurrentSellPrice: event.CurrentSellPrice,
+				Message:          event.Message,
+			}
+			if err := resend.SendPredictMarketAlert(event.RecipientEmail, decision); err != nil {
+				log.Printf("❌ [alerts.predict] failed to send email to %s: %v", event.RecipientEmail, err)
+			} else {
+				log.Printf("✅ [alerts.predict] sent alert for %s to %s", event.Question, event.RecipientEmail)
+			}
+			_ = r.CommitMessages(ctx, msg)
+			return nil
+		},
+	)
+}
+
+// consumeWithBackoff runs the consume loop for a topic/group, recreating the reader with
+// exponential backoff whenever FetchMessage returns a persistent error. This handles transient
+// broker errors (e.g. "Group Coordinator Not Available") without spinning the CPU.
+func consumeWithBackoff(
+	ctx context.Context,
+	brokers []string,
+	topic, groupID string,
+	handle func(context.Context, *kafka.Reader) error,
+) {
+	log.Printf("🔄 [%s] consumer goroutine started, waiting for messages...", topic)
+
+	const (
+		backoffMin = 2 * time.Second
+		backoffMax = 60 * time.Second
+	)
+	backoff := backoffMin
 
 	for {
-		msg, err := r.FetchMessage(ctx)
-		if err != nil {
-			if ctx.Err() != nil {
-				return
+		if ctx.Err() != nil {
+			return
+		}
+
+		r := newReader(brokers, topic, groupID)
+		for {
+			if err := handle(ctx, r); err != nil {
+				if ctx.Err() != nil {
+					r.Close()
+					return
+				}
+				log.Printf("⚠️  [%s] read error (retrying in %v): %v", topic, backoff, err)
+				r.Close()
+				select {
+				case <-ctx.Done():
+					return
+				case <-time.After(backoff):
+				}
+				// Exponential backoff, capped at backoffMax
+				backoff *= 2
+				if backoff > backoffMax {
+					backoff = backoffMax
+				}
+				break // recreate the reader
 			}
-			log.Printf("⚠️  [alerts.predict] read error: %v", err)
-			continue
+			backoff = backoffMin // reset on successful message
 		}
-
-		var event message.PredictMarketAlertEvent
-		if err := json.Unmarshal(msg.Value, &event); err != nil {
-			log.Printf("⚠️  [alerts.predict] unmarshal error: %v", err)
-			_ = r.CommitMessages(ctx, msg)
-			continue
-		}
-
-		decision := &core.PredictMarketAlertDecision{
-			ShouldAlert: true,
-			Rule: &core.PredictMarketAlertRule{
-				PredictMarket: event.PredictMarket,
-				TokenID:       event.TokenID,
-				Field:         event.Field,
-				Threshold:     event.Threshold,
-				Direction:     core.Direction(event.Direction),
-				Question:      event.Question,
-				Outcome:       event.Outcome,
-				QuestionID:    event.QuestionID,
-				ConditionID:   event.ConditionID,
-				NegRisk:       event.NegRisk,
-			},
-			CurrentMidpoint:  event.CurrentMidpoint,
-			CurrentBuyPrice:  event.CurrentBuyPrice,
-			CurrentSellPrice: event.CurrentSellPrice,
-			Message:          event.Message,
-		}
-
-		if err := resend.SendPredictMarketAlert(event.RecipientEmail, decision); err != nil {
-			log.Printf("❌ [alerts.predict] failed to send email to %s: %v", event.RecipientEmail, err)
-		} else {
-			log.Printf("✅ [alerts.predict] sent alert for %s to %s", event.Question, event.RecipientEmail)
-		}
-		_ = r.CommitMessages(ctx, msg)
 	}
 }
 

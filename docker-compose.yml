@@ -17,10 +17,13 @@ services:
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
       KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
     healthcheck:
-      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --list || exit 1"]
+      # kafka-consumer-groups.sh --list exercises the group coordinator API directly.
+      # It will return error 15 (Group Coordinator Not Available) until the broker is
+      # fully ready, making this a reliable gate for consumer-group dependent services.
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-consumer-groups.sh --bootstrap-server localhost:9092 --list >/dev/null 2>&1 || exit 1"]
       interval: 10s
-      timeout: 5s
-      retries: 10
+      timeout: 10s
+      retries: 15
       start_period: 30s
     restart: unless-stopped
 

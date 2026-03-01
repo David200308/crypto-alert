@@ -93,100 +93,182 @@ func (c *ESClient) GetDates(ctx context.Context) ([]string, error) {
 	return dates, nil
 }
 
-// LogEntry is a single log line with a timestamp for cursor-based pagination.
+// LogEntry is a single log line with a parsed timestamp.
 type LogEntry struct {
 	Message string `json:"message"`
 	TS      string `json:"ts"` // RFC3339
 }
 
-// GetLogsForDate returns log entries for the given date (yyyyMMdd), optionally after a cursor and filtered by search.
-// after is RFC3339; empty means from start of day. searchQ filters by message content (empty = no filter).
-// nextCursor is the TS of the last entry (for the next request's after).
-func (c *ESClient) GetLogsForDate(ctx context.Context, dateStr, after, searchQ string) ([]LogEntry, string, error) {
+// buildQuery wraps a range query with an optional full-text search on message.
+func buildQuery(tsRange map[string]interface{}, searchQ string) map[string]interface{} {
+	rangeQ := map[string]interface{}{"range": map[string]interface{}{"@timestamp": tsRange}}
+	if searchQ == "" {
+		return rangeQ
+	}
+	return map[string]interface{}{
+		"bool": map[string]interface{}{
+			"must": []interface{}{
+				rangeQ,
+				map[string]interface{}{
+					"simple_query_string": map[string]interface{}{
+						"query":  searchQ,
+						"fields": []string{"message"},
+					},
+				},
+			},
+		},
+	}
+}
+
+// fetchESLogs pages through ES results for the given query using search_after, returning all entries.
+func (c *ESClient) fetchESLogs(ctx context.Context, query map[string]interface{}) ([]LogEntry, error) {
+	const pageSize = 10000
+	sortClause := []map[string]interface{}{{"@timestamp": map[string]string{"order": "asc"}}}
+
+	var allEntries []LogEntry
+	var searchAfter []interface{}
+
+	for {
+		body := map[string]interface{}{
+			"size":    pageSize,
+			"sort":    sortClause,
+			"_source": []string{"message", "@timestamp"},
+			"query":   query,
+		}
+		if len(searchAfter) > 0 {
+			body["search_after"] = searchAfter
+		}
+
+		var buf bytes.Buffer
+		if err := json.NewEncoder(&buf).Encode(body); err != nil {
+			return nil, err
+		}
+		res, err := esapi.SearchRequest{Index: []string{c.index}, Body: &buf}.Do(ctx, c.client)
+		if err != nil {
+			return nil, err
+		}
+		var out struct {
+			Hits struct {
+				Hits []struct {
+					Source struct {
+						Message   string `json:"message"`
+						Timestamp string `json:"@timestamp"`
+					} `json:"_source"`
+					Sort []interface{} `json:"sort"`
+				} `json:"hits"`
+			} `json:"hits"`
+		}
+		decodeErr := json.NewDecoder(res.Body).Decode(&out)
+		res.Body.Close()
+		if res.IsError() {
+			return nil, errFromESResponse(res)
+		}
+		if decodeErr != nil {
+			return nil, decodeErr
+		}
+
+		hits := out.Hits.Hits
+		if len(hits) == 0 {
+			break
+		}
+		for _, h := range hits {
+			msg := strings.TrimSpace(h.Source.Message)
+			if msg != "" {
+				allEntries = append(allEntries, LogEntry{Message: msg, TS: h.Source.Timestamp})
+			}
+		}
+		if len(hits) < pageSize {
+			break
+		}
+		searchAfter = hits[len(hits)-1].Sort
+		if len(searchAfter) == 0 {
+			break
+		}
+	}
+	return allEntries, nil
+}
+
+// GetLogsForDate returns all log entries for the given date (yyyyMMdd), optionally filtered by searchQ.
+// Pages through ES automatically using search_after to return the complete day's logs.
+func (c *ESClient) GetLogsForDate(ctx context.Context, dateStr, searchQ string) ([]LogEntry, error) {
 	if c == nil || c.client == nil {
-		return nil, "", nil
+		return nil, nil
 	}
 	t, err := time.Parse("20060102", dateStr)
 	if err != nil {
-		return nil, "", err
+		return nil, err
+	}
+	start := t.UTC().Format(time.RFC3339)
+	end := t.Add(24 * time.Hour).UTC().Format(time.RFC3339)
+	return c.fetchESLogs(ctx, buildQuery(map[string]interface{}{"gte": start, "lt": end}, searchQ))
+}
+
+// GetLogsSince returns only log entries that arrived strictly after `since` (RFC3339) for the given date.
+// Used for incremental checkpoint-based updates.
+func (c *ESClient) GetLogsSince(ctx context.Context, dateStr, since, searchQ string) ([]LogEntry, error) {
+	if c == nil || c.client == nil {
+		return nil, nil
+	}
+	t, err := time.Parse("20060102", dateStr)
+	if err != nil {
+		return nil, err
+	}
+	end := t.Add(24 * time.Hour).UTC().Format(time.RFC3339)
+	return c.fetchESLogs(ctx, buildQuery(map[string]interface{}{"gt": since, "lt": end}, searchQ))
+}
+
+// GetCheckpoint returns the RFC3339 timestamp of the most recent log entry for the given date.
+// Returns an empty string when no entries exist.
+func (c *ESClient) GetCheckpoint(ctx context.Context, dateStr string) (string, error) {
+	if c == nil || c.client == nil {
+		return "", nil
+	}
+	t, err := time.Parse("20060102", dateStr)
+	if err != nil {
+		return "", err
 	}
 	start := t.UTC().Format(time.RFC3339)
 	end := t.Add(24 * time.Hour).UTC().Format(time.RFC3339)
 
-	tsRange := map[string]string{"lt": end}
-	if after != "" {
-		tsRange["gt"] = after
-	} else {
-		tsRange["gte"] = start
-	}
-	rangeQ := map[string]interface{}{"range": map[string]interface{}{"@timestamp": tsRange}}
-
-	var query map[string]interface{}
-	if searchQ != "" {
-		query = map[string]interface{}{
-			"bool": map[string]interface{}{
-				"must": []interface{}{
-					rangeQ,
-					map[string]interface{}{
-						"simple_query_string": map[string]interface{}{
-							"query":  searchQ,
-							"fields": []string{"message"},
-						},
-					},
-				},
-			},
-		}
-	} else {
-		query = rangeQ
-	}
-
 	body := map[string]interface{}{
-		"size":    10000,
-		"sort":    []map[string]interface{}{{"@timestamp": map[string]string{"order": "asc"}}},
-		"_source": []string{"message", "@timestamp"},
-		"query":   query,
+		"size":    1,
+		"sort":    []map[string]interface{}{{"@timestamp": map[string]string{"order": "desc"}}},
+		"_source": []string{"@timestamp"},
+		"query": map[string]interface{}{
+			"range": map[string]interface{}{
+				"@timestamp": map[string]interface{}{"gte": start, "lt": end},
+			},
+		},
 	}
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(body); err != nil {
-		return nil, "", err
+		return "", err
 	}
-	req := esapi.SearchRequest{
-		Index: []string{c.index},
-		Body:  &buf,
-	}
-	res, err := req.Do(ctx, c.client)
+	res, err := esapi.SearchRequest{Index: []string{c.index}, Body: &buf}.Do(ctx, c.client)
 	if err != nil {
-		return nil, "", err
-	}
-	defer res.Body.Close()
-	if res.IsError() {
-		return nil, "", errFromESResponse(res)
+		return "", err
 	}
 	var out struct {
 		Hits struct {
 			Hits []struct {
 				Source struct {
-					Message   string `json:"message"`
 					Timestamp string `json:"@timestamp"`
 				} `json:"_source"`
 			} `json:"hits"`
 		} `json:"hits"`
 	}
-	if err := json.NewDecoder(res.Body).Decode(&out); err != nil {
-		return nil, "", err
+	decodeErr := json.NewDecoder(res.Body).Decode(&out)
+	res.Body.Close()
+	if res.IsError() {
+		return "", errFromESResponse(res)
 	}
-	entries := make([]LogEntry, 0, len(out.Hits.Hits))
-	var nextCursor string
-	for _, h := range out.Hits.Hits {
-		msg := strings.TrimSpace(h.Source.Message)
-		if msg == "" {
-			continue
-		}
-		ts := h.Source.Timestamp
-		entries = append(entries, LogEntry{Message: msg, TS: ts})
-		nextCursor = ts
+	if decodeErr != nil {
+		return "", decodeErr
 	}
-	return entries, nextCursor, nil
+	if len(out.Hits.Hits) == 0 {
+		return "", nil
+	}
+	return out.Hits.Hits[0].Source.Timestamp, nil
 }
 
 func errFromESResponse(res *esapi.Response) error {

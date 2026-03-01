@@ -9,7 +9,10 @@ function App() {
   const [loading, setLoading] = useState(false)
   const [autoRefresh, setAutoRefresh] = useState(true)
   const [error, setError] = useState(null)
-  const [nextCursor, setNextCursor] = useState('')  // for incremental fetch: only get logs after this
+  // checkpoint: RFC3339 timestamp of the last known log entry for the selected date.
+  // Used to detect new entries without re-fetching the full day.
+  const checkpointRef = useRef('')          // mutable ref so the interval closure always reads current value
+  const searchTermRef = useRef('')          // same pattern to avoid stale closure in the polling interval
   const logEndRef = useRef(null)
   const scrollContainerRef = useRef(null)
 
@@ -29,14 +32,25 @@ function App() {
     }
   }
 
-  // Fetch logs: full load (no after) or incremental (after=nextCursor). Search is always sent as ?q=.
-  const fetchLogs = async (date, append = false) => {
+  // fetchCheckpoint: lightweight call to /api/logs/checkpoint/{date}.
+  // Returns the latest RFC3339 timestamp for the day, or '' on failure.
+  const fetchCheckpoint = async (date) => {
+    try {
+      const res = await fetch(`/api/logs/checkpoint/${date}`)
+      if (res.ok) {
+        const data = await res.json()
+        return data.checkpoint || ''
+      }
+    } catch {}
+    return ''
+  }
+
+  // fetchLogs: full day load. Resets checkpoint to the latest entry after loading.
+  const fetchLogs = async (date) => {
     if (!date) return
 
-    const cursor = append ? nextCursor : ''
     const params = new URLSearchParams()
-    if (cursor) params.set('after', cursor)
-    if (searchTerm.trim()) params.set('q', searchTerm.trim())
+    if (searchTermRef.current.trim()) params.set('q', searchTermRef.current.trim())
     const query = params.toString()
     const url = `/api/logs/${date}${query ? `?${query}` : ''}`
 
@@ -44,26 +58,40 @@ function App() {
     setError(null)
     try {
       const response = await fetch(url)
-      if (!response.ok) {
-        throw new Error(`Failed to fetch logs: ${response.statusText}`)
-      }
+      if (!response.ok) throw new Error(`Failed to fetch logs: ${response.statusText}`)
       const data = await response.json()
-      const newLogs = data.logs || []
-      if (append && logs.length > 0) {
-        setLogs(prev => [...prev, ...newLogs])
-      } else {
-        setLogs(newLogs)
-      }
-      setNextCursor(data.nextCursor || '')
+      setLogs(data.logs || [])
+      // Sync checkpoint to the true latest entry for the day
+      const cp = await fetchCheckpoint(date)
+      checkpointRef.current = cp
     } catch (err) {
       setError(err.message)
-      if (!append) setLogs([])
+      setLogs([])
     } finally {
       setLoading(false)
     }
   }
 
-  // Auto-scroll to bottom when new logs arrive
+  // fetchDiff: called by the polling interval when the ES checkpoint is newer than ours.
+  // Fetches only entries after the stored checkpoint and prepends them to the log list.
+  const fetchDiff = async (date, since) => {
+    try {
+      const params = new URLSearchParams({ since })
+      if (searchTermRef.current.trim()) params.set('q', searchTermRef.current.trim())
+      const res = await fetch(`/api/logs/${date}?${params.toString()}`)
+      if (!res.ok) return
+      const data = await res.json()
+      const newLogs = data.logs || []
+      if (newLogs.length > 0) {
+        setLogs(prev => [...newLogs, ...prev])  // prepend: newest entries appear at the top
+      }
+    } catch {}
+  }
+
+  // Keep searchTermRef in sync so the polling interval always sees the latest value
+  useEffect(() => { searchTermRef.current = searchTerm }, [searchTerm])
+
+  // Auto-scroll to bottom on initial / full loads (not on prepended diff entries)
   useEffect(() => {
     if (autoRefresh && logEndRef.current) {
       logEndRef.current.scrollIntoView({ behavior: 'smooth' })
@@ -75,34 +103,45 @@ function App() {
     fetchAvailableDates()
   }, [])
 
-  // Fetch logs when date changes (full load)
+  // Full reload whenever the selected date changes; reset checkpoint
   useEffect(() => {
     if (selectedDate) {
-      fetchLogs(selectedDate, false)
+      checkpointRef.current = ''
+      fetchLogs(selectedDate)
     }
   }, [selectedDate])
 
-  // When user types in search: debounce then full load with ?q= (backend does the search)
+  // Search debounce: full reload with current ?q= when the user types
   useEffect(() => {
     if (!selectedDate) return
-    const t = setTimeout(() => {
-      fetchLogs(selectedDate, false) // fetchLogs already sends searchTerm as ?q=
-    }, 400)
+    const t = setTimeout(() => fetchLogs(selectedDate), 400)
     return () => clearTimeout(t)
-  }, [searchTerm, selectedDate]) // run when search term or date changes so ?q= is applied
+  }, [searchTerm, selectedDate])
 
-  // Auto-refresh every 30s: incremental (only new logs after nextCursor) when cursor exists, else full fetch
+  // Checkpoint polling every 30s.
+  // 1. Fetch the latest checkpoint from the server (lightweight).
+  // 2. If it differs from our stored checkpoint, fetch only the diff and prepend it.
+  // 3. If unchanged, do nothing.
   useEffect(() => {
     if (!autoRefresh || !selectedDate) return
-    const interval = setInterval(() => {
-      if (nextCursor) {
-        fetchLogs(selectedDate, true)
+    const interval = setInterval(async () => {
+      const latestCheckpoint = await fetchCheckpoint(selectedDate)
+      if (!latestCheckpoint || latestCheckpoint === checkpointRef.current) return
+
+      const prevCheckpoint = checkpointRef.current
+      // Update checkpoint first to prevent duplicate fetches on rapid ticks
+      checkpointRef.current = latestCheckpoint
+
+      if (prevCheckpoint) {
+        // We have a baseline — fetch only the new entries
+        await fetchDiff(selectedDate, prevCheckpoint)
       } else {
-        fetchLogs(selectedDate, false)
+        // No baseline yet (e.g. date just changed) — full reload to be safe
+        await fetchLogs(selectedDate)
       }
     }, 30000)
     return () => clearInterval(interval)
-  }, [autoRefresh, selectedDate, nextCursor])
+  }, [autoRefresh, selectedDate])
 
   // Format date for display
   const formatDateDisplay = (dateStr) => {
@@ -137,7 +176,7 @@ function App() {
             <button 
               onClick={() => {
                 fetchAvailableDates()
-                if (selectedDate) fetchLogs(selectedDate, false)
+                if (selectedDate) fetchLogs(selectedDate)
               }}
               className="flex items-center gap-2 bg-blue-500 text-white border-none px-4 py-2 rounded-md cursor-pointer text-sm transition-colors hover:bg-blue-600 disabled:opacity-60 disabled:cursor-not-allowed w-full md:w-auto"
               disabled={loading}

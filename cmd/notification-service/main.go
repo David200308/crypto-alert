@@ -41,6 +41,12 @@ func main() {
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
 
+	// Block until the Kafka group coordinator is truly ready.
+	// kafka.NewReader with a GroupID spawns a background goroutine that immediately
+	// calls JoinGroup. Creating readers before the coordinator is ready floods the
+	// logs with "Group Coordinator Not Available" errors from that goroutine.
+	waitForGroupCoordinator(ctx, brokers)
+
 	go consumeTokenAlerts(ctx, brokers, resend)
 	go consumeDeFiAlerts(ctx, brokers, resend)
 	go consumePredictAlerts(ctx, brokers, resend)
@@ -233,6 +239,49 @@ func consumeWithBackoff(
 				break // recreate the reader
 			}
 			backoff = backoffMin // reset on successful message
+		}
+	}
+}
+
+// waitForGroupCoordinator polls the Kafka group coordinator API with exponential backoff
+// until it responds successfully. Using kafka.Client.FindCoordinator directly avoids
+// creating a full Reader (which would itself trigger the noisy background join goroutine).
+func waitForGroupCoordinator(ctx context.Context, brokers []string) {
+	if len(brokers) == 0 || ctx.Err() != nil {
+		return
+	}
+	client := &kafka.Client{
+		Addr:    kafka.TCP(brokers[0]),
+		Timeout: 5 * time.Second,
+	}
+	backoff := 1 * time.Second
+	for {
+		if ctx.Err() != nil {
+			return
+		}
+		resp, err := client.FindCoordinator(ctx, &kafka.FindCoordinatorRequest{
+			Addr:    kafka.TCP(brokers[0]),
+			Key:     "__notification_healthcheck__",
+			KeyType: kafka.CoordinatorKeyTypeConsumer,
+		})
+		if err == nil && resp.Error == nil {
+			log.Printf("✅ Kafka group coordinator is ready")
+			return
+		}
+		reason := "unknown"
+		if err != nil {
+			reason = err.Error()
+		} else if resp.Error != nil {
+			reason = resp.Error.Error()
+		}
+		log.Printf("⏳ Waiting for Kafka group coordinator (%s), retrying in %v...", reason, backoff)
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(backoff):
+		}
+		if backoff < 30*time.Second {
+			backoff *= 2
 		}
 	}
 }

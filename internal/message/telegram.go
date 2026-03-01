@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"html"
 	"io"
 	"log"
 	"net/http"
@@ -96,6 +97,7 @@ func formatTokenAlertTelegram(decision *core.AlertDecision) string {
 	r := decision.Rule
 	p := decision.CurrentPrice
 	emoji := telegramDirectionEmoji(string(r.Direction))
+	dir := html.EscapeString(string(r.Direction))
 	return fmt.Sprintf(
 		"🚨 <b>Crypto Alert Triggered</b>\n\n"+
 			"%s <b>%s</b>\n\n"+
@@ -106,7 +108,7 @@ func formatTokenAlertTelegram(decision *core.AlertDecision) string {
 		emoji, p.Symbol,
 		p.Price,
 		r.Threshold,
-		r.Direction, r.Threshold,
+		dir, r.Threshold,
 		p.Timestamp.Format(time.RFC3339),
 	)
 }
@@ -114,6 +116,7 @@ func formatTokenAlertTelegram(decision *core.AlertDecision) string {
 func formatDeFiAlertTelegram(decision *core.DeFiAlertDecision) string {
 	r := decision.Rule
 	emoji := telegramDirectionEmoji(string(r.Direction))
+	dir := html.EscapeString(string(r.Direction))
 
 	var valueStr, thresholdStr string
 	if r.Field == "TVL" {
@@ -152,7 +155,7 @@ func formatDeFiAlertTelegram(decision *core.DeFiAlertDecision) string {
 		r.Field,
 		valueStr,
 		thresholdStr,
-		r.Field, r.Direction, thresholdStr,
+		r.Field, dir, thresholdStr,
 		time.Now().UTC().Format(time.RFC3339),
 	)
 	return msg
@@ -161,6 +164,7 @@ func formatDeFiAlertTelegram(decision *core.DeFiAlertDecision) string {
 func formatPredictMarketAlertTelegram(decision *core.PredictMarketAlertDecision) string {
 	r := decision.Rule
 	emoji := telegramDirectionEmoji(string(r.Direction))
+	dir := html.EscapeString(string(r.Direction))
 	return fmt.Sprintf(
 		"🚨 <b>Prediction Market Alert</b>\n\n"+
 			"%s <b>%s</b>\n\n"+
@@ -179,7 +183,7 @@ func formatPredictMarketAlertTelegram(decision *core.PredictMarketAlertDecision)
 		decision.CurrentBuyPrice,
 		decision.CurrentSellPrice,
 		r.Threshold,
-		r.Direction, r.Threshold,
+		dir, r.Threshold,
 		time.Now().UTC().Format(time.RFC3339),
 	)
 }

@@ -376,8 +376,8 @@ func checkAndAlertPredictMarkets(
 			continue
 		}
 
-		log.Printf("💰 [%s] %s - midpoint=%.4f buy=%.4f sell=%.4f",
-			rule.Outcome, rule.Question, tp.Midpoint, tp.BuyPrice, tp.SellPrice)
+		log.Printf("💰 [%s] [%s] %s - midpoint=%.4f buy=%.4f sell=%.4f",
+			rule.PredictMarket, rule.Outcome, rule.Question, tp.Midpoint, tp.BuyPrice, tp.SellPrice)
 
 		decisions := decisionEngine.EvaluatePredictMarket(rule.TokenID, tp.Midpoint, tp.BuyPrice, tp.SellPrice)
 		for _, decision := range decisions {

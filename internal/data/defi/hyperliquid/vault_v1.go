@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
 	"time"
 )
 
@@ -84,30 +85,37 @@ type vaultDetailsRequest struct {
 	VaultAddress string `json:"vaultAddress"`
 }
 
-// hyperliquidVaultAPIResponse represents the Hyperliquid API response for vault details
+// hyperliquidVaultAPIResponse represents the Hyperliquid API response for vaultDetails
 type hyperliquidVaultAPIResponse struct {
-	Name      string      `json:"name"`
-	Leader    string      `json:"leader"`
-	APR       float64     `json:"apr"`
-	IsClosed  bool        `json:"isClosed"`
-	Portfolio interface{} `json:"portfolio"` // [[amount, currency], ...] — parsed manually
+	Name     string  `json:"name"`
+	Leader   string  `json:"leader"`
+	APR      float64 `json:"apr"`
+	IsClosed bool    `json:"isClosed"`
 }
 
-// GetVaultData fetches vault data from Hyperliquid API
-func (c *HyperliquidVaultClient) GetVaultData(ctx context.Context) (*VaultData, error) {
-	reqBody := vaultDetailsRequest{
-		Type:         "vaultDetails",
-		VaultAddress: c.ledgerAddress,
-	}
+// clearinghouseStateRequest is the POST body for Hyperliquid clearinghouseState API
+type clearinghouseStateRequest struct {
+	Type string `json:"type"`
+	User string `json:"user"`
+}
 
-	bodyBytes, err := json.Marshal(reqBody)
+// clearinghouseStateResponse represents the relevant fields from clearinghouseState
+type clearinghouseStateResponse struct {
+	MarginSummary struct {
+		AccountValue string `json:"accountValue"`
+	} `json:"marginSummary"`
+}
+
+// postInfo sends a POST request to the Hyperliquid /info endpoint and decodes the response into dst.
+func (c *HyperliquidVaultClient) postInfo(ctx context.Context, body interface{}, dst interface{}) error {
+	bodyBytes, err := json.Marshal(body)
 	if err != nil {
-		return nil, fmt.Errorf("failed to marshal request body: %w", err)
+		return fmt.Errorf("failed to marshal request body: %w", err)
 	}
 
 	req, err := http.NewRequestWithContext(ctx, "POST", c.chainInfo.APIURL, bytes.NewReader(bodyBytes))
 	if err != nil {
-		return nil, fmt.Errorf("failed to create HTTP request: %w", err)
+		return fmt.Errorf("failed to create HTTP request: %w", err)
 	}
 
 	req.Header.Set("Content-Type", "application/json")
@@ -116,57 +124,44 @@ func (c *HyperliquidVaultClient) GetVaultData(ctx context.Context) (*VaultData, 
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("failed to fetch vault data from Hyperliquid API: %w", err)
+		return fmt.Errorf("failed to call Hyperliquid API: %w", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
 		respBytes, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("Hyperliquid API returned status %d: %s", resp.StatusCode, string(respBytes))
+		return fmt.Errorf("Hyperliquid API returned status %d: %s", resp.StatusCode, string(respBytes))
 	}
 
-	var apiResp hyperliquidVaultAPIResponse
-	if err := json.NewDecoder(resp.Body).Decode(&apiResp); err != nil {
-		return nil, fmt.Errorf("failed to parse Hyperliquid API response: %w", err)
+	if err := json.NewDecoder(resp.Body).Decode(dst); err != nil {
+		return fmt.Errorf("failed to parse Hyperliquid API response: %w", err)
 	}
-
-	// Parse TVL from portfolio — format: [[amount_str, currency], ...]
-	tvl := parseTVLFromPortfolio(apiResp.Portfolio)
-
-	return &VaultData{
-		Name:   apiResp.Name,
-		APR:    apiResp.APR * 100, // Convert decimal to percentage (0.15 → 15.0)
-		TVL:    tvl,
-		Closed: apiResp.IsClosed,
-	}, nil
+	return nil
 }
 
-// parseTVLFromPortfolio extracts the USD TVL from the portfolio field.
-// Hyperliquid returns portfolio as a list of [amount, currency] pairs.
-// We sum all USD amounts.
-func parseTVLFromPortfolio(portfolio interface{}) float64 {
-	if portfolio == nil {
-		return 0
+// GetVaultData fetches vault data from Hyperliquid API.
+// APR comes from vaultDetails; TVL comes from clearinghouseState.accountValue.
+func (c *HyperliquidVaultClient) GetVaultData(ctx context.Context) (*VaultData, error) {
+	// Fetch APR via vaultDetails
+	var vaultResp hyperliquidVaultAPIResponse
+	if err := c.postInfo(ctx, vaultDetailsRequest{Type: "vaultDetails", VaultAddress: c.ledgerAddress}, &vaultResp); err != nil {
+		return nil, fmt.Errorf("vaultDetails: %w", err)
 	}
 
-	outer, ok := portfolio.([]interface{})
-	if !ok {
-		return 0
+	// Fetch TVL via clearinghouseState (marginSummary.accountValue is the vault's total equity in USD)
+	var stateResp clearinghouseStateResponse
+	if err := c.postInfo(ctx, clearinghouseStateRequest{Type: "clearinghouseState", User: c.ledgerAddress}, &stateResp); err != nil {
+		return nil, fmt.Errorf("clearinghouseState: %w", err)
 	}
 
-	var total float64
-	for _, item := range outer {
-		pair, ok := item.([]interface{})
-		if !ok || len(pair) < 2 {
-			continue
-		}
-		amount, ok := pair[0].(float64)
-		if !ok {
-			continue
-		}
-		total += amount
-	}
-	return total
+	tvl, _ := strconv.ParseFloat(stateResp.MarginSummary.AccountValue, 64)
+
+	return &VaultData{
+		Name:   vaultResp.Name,
+		APR:    vaultResp.APR * 100, // Convert decimal to percentage (0.15 → 15.0)
+		TVL:    tvl,
+		Closed: vaultResp.IsClosed,
+	}, nil
 }
 
 // GetFieldValue retrieves the value for a specific field (APY or TVL)

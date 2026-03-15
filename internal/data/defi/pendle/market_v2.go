@@ -57,7 +57,7 @@ var supportedChains = map[string]ChainInfo{
 	},
 }
 
-const pendleAPIBaseURL = "https://api-v2.pendle.finance/core/v2"
+const pendleAPIBaseURL = "https://api-v2.pendle.finance/core/v1"
 
 // PendleMarketClient handles interactions with Pendle PT markets via REST API
 type PendleMarketClient struct {
@@ -91,18 +91,13 @@ func NewPendleMarketClient(chainID, marketAddress, marketName string) (*PendleMa
 // Close closes the HTTP client (no-op, kept for interface consistency)
 func (c *PendleMarketClient) Close() {}
 
-// pendleMarketAPIResponse represents the Pendle API response for a single market
+// pendleMarketAPIResponse represents the Pendle API response for GET /v1/{chainId}/markets/{address}
+// impliedApy is a flat field; liquidity is a nested object with a usd field.
 type pendleMarketAPIResponse struct {
-	Details struct {
-		ImpliedAPY float64 `json:"impliedApy"`
-		Liquidity  struct {
-			USD float64 `json:"usd"`
-		} `json:"liquidity"`
-		PT struct {
-			Address string `json:"address"`
-			Symbol  string `json:"symbol"`
-		} `json:"pt"`
-	} `json:"details"`
+	ImpliedAPY float64 `json:"impliedApy"` // Implied APY of the PT market (decimal, e.g. 0.05 = 5%)
+	Liquidity  struct {
+		USD float64 `json:"usd"` // Market liquidity in USD (PT + SY in AMM)
+	} `json:"liquidity"`
 }
 
 // GetMarketData fetches market data from Pendle API
@@ -134,8 +129,8 @@ func (c *PendleMarketClient) GetMarketData(ctx context.Context) (*MarketData, er
 	}
 
 	return &MarketData{
-		ImpliedAPY: apiResp.Details.ImpliedAPY * 100, // Convert to percentage
-		TVL:        apiResp.Details.Liquidity.USD,
+		ImpliedAPY: apiResp.ImpliedAPY * 100, // Convert decimal to percentage (0.05 → 5.0)
+		TVL:        apiResp.Liquidity.USD,
 	}, nil
 }
 

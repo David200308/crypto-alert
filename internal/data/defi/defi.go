@@ -10,8 +10,10 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 
 	"crypto-alert/internal/data/defi/aave"
+	"crypto-alert/internal/data/defi/hyperliquid"
 	"crypto-alert/internal/data/defi/kamino"
 	"crypto-alert/internal/data/defi/morpho"
+	"crypto-alert/internal/data/defi/pendle"
 )
 
 // ClientManager manages DeFi protocol clients
@@ -55,6 +57,14 @@ func (cm *ClientManager) Close() {
 				c.Close()
 			}
 		case *kamino.KaminoVaultClient:
+			if c != nil {
+				c.Close()
+			}
+		case *pendle.PendleMarketClient:
+			if c != nil {
+				c.Close()
+			}
+		case *hyperliquid.HyperliquidVaultClient:
 			if c != nil {
 				c.Close()
 			}
@@ -243,8 +253,83 @@ func (cm *ClientManager) GetFieldValue(ctx context.Context, rule *core.DeFiAlert
 			return 0, "", fmt.Errorf("invalid category '%s' for Kamino protocol (must be 'vault')", rule.Category)
 		}
 
+	} else if rule.Protocol == "pendle" {
+		// Handle Pendle PT markets
+		if rule.Category == "pt" {
+			marketAddress := rule.MarketTokenContract
+			key := clientKey{protocol: "pendle", category: "pt", chainID: rule.ChainID, identifier: marketAddress}
+			client, ok := cm.clients[key].(*pendle.PendleMarketClient)
+			if !ok {
+				if marketAddress == "" {
+					return 0, "", fmt.Errorf("missing required field for Pendle PT market: market_token_contract is required")
+				}
+				client, err = pendle.NewPendleMarketClient(rule.ChainID, marketAddress, rule.MarketTokenName)
+				if err != nil {
+					return 0, "", fmt.Errorf("failed to create Pendle client for chain %s: %w", rule.ChainID, err)
+				}
+				cm.clients[key] = client
+			}
+
+			chainName, err = pendle.GetChainNameFromID(rule.ChainID)
+			if err != nil {
+				return 0, "", fmt.Errorf("failed to get chain name for chain %s: %w", rule.ChainID, err)
+			}
+
+			fieldType := pendle.FieldType(rule.Field)
+			value, err = client.GetFieldValue(ctx, fieldType)
+			if err != nil {
+				marketDisplay := marketAddress
+				if rule.MarketTokenName != "" {
+					marketDisplay = rule.MarketTokenName
+				}
+				return 0, chainName, fmt.Errorf("failed to fetch %s for Pendle PT market %s on %s: %w", rule.Field, marketDisplay, chainName, err)
+			}
+
+		} else {
+			return 0, "", fmt.Errorf("invalid category '%s' for Pendle protocol (must be 'pt')", rule.Category)
+		}
+
+	} else if rule.Protocol == "hyperliquid" {
+		// Handle Hyperliquid vault
+		if rule.Category == "vault" {
+			ledgerAddress := rule.LedgerAddress
+			if ledgerAddress == "" {
+				ledgerAddress = rule.MarketTokenContract
+			}
+			key := clientKey{protocol: "hyperliquid", category: "vault", chainID: rule.ChainID, identifier: ledgerAddress}
+			client, ok := cm.clients[key].(*hyperliquid.HyperliquidVaultClient)
+			if !ok {
+				if ledgerAddress == "" {
+					return 0, "", fmt.Errorf("missing required field for Hyperliquid vault: ledger_address is required")
+				}
+				client, err = hyperliquid.NewHyperliquidVaultClient(rule.ChainID, ledgerAddress, rule.VaultName)
+				if err != nil {
+					return 0, "", fmt.Errorf("failed to create Hyperliquid vault client: %w", err)
+				}
+				cm.clients[key] = client
+			}
+
+			chainName, err = hyperliquid.GetChainNameFromID(rule.ChainID)
+			if err != nil {
+				return 0, "", fmt.Errorf("failed to get chain name for chain %s: %w", rule.ChainID, err)
+			}
+
+			fieldType := hyperliquid.FieldType(rule.Field)
+			value, err = client.GetFieldValue(ctx, fieldType)
+			if err != nil {
+				vaultDisplay := ledgerAddress
+				if rule.VaultName != "" {
+					vaultDisplay = rule.VaultName
+				}
+				return 0, chainName, fmt.Errorf("failed to fetch %s for Hyperliquid vault %s: %w", rule.Field, vaultDisplay, err)
+			}
+
+		} else {
+			return 0, "", fmt.Errorf("invalid category '%s' for Hyperliquid protocol (must be 'vault')", rule.Category)
+		}
+
 	} else {
-		return 0, "", fmt.Errorf("unsupported protocol: %s %s (supported: aave v3, morpho v1, morpho v2, kamino)", rule.Protocol, rule.Version)
+		return 0, "", fmt.Errorf("unsupported protocol: %s %s (supported: aave v3, morpho v1, morpho v2, kamino, pendle v2, hyperliquid v1)", rule.Protocol, rule.Version)
 	}
 
 	return value, chainName, nil
@@ -259,6 +344,10 @@ func GetChainName(protocol, chainID string) (string, error) {
 		return morpho.GetChainNameFromID(chainID)
 	case "kamino":
 		return kamino.GetChainNameFromID(chainID)
+	case "pendle":
+		return pendle.GetChainNameFromID(chainID)
+	case "hyperliquid":
+		return hyperliquid.GetChainNameFromID(chainID)
 	default:
 		return "", fmt.Errorf("unsupported protocol: %s", protocol)
 	}
@@ -273,6 +362,10 @@ func GetDisplayName(rule *core.DeFiAlertRule) string {
 	} else if rule.Protocol == "morpho" && rule.Category == "vault" && rule.VaultName != "" {
 		return " (" + rule.VaultName + ")"
 	} else if rule.Protocol == "kamino" && rule.Category == "vault" && rule.VaultName != "" {
+		return " (" + rule.VaultName + ")"
+	} else if rule.Protocol == "pendle" && rule.MarketTokenName != "" {
+		return " (" + rule.MarketTokenName + ")"
+	} else if rule.Protocol == "hyperliquid" && rule.VaultName != "" {
 		return " (" + rule.VaultName + ")"
 	}
 	return ""
@@ -291,8 +384,12 @@ func GetIdentifier(rule *core.DeFiAlertRule) string {
 	if (rule.Protocol == "morpho" || rule.Protocol == "kamino") && rule.Category == "vault" && rule.VaultTokenAddress != "" {
 		return rule.VaultTokenAddress
 	}
+	if rule.Protocol == "hyperliquid" && rule.LedgerAddress != "" {
+		return rule.LedgerAddress
+	}
 	return rule.MarketTokenContract
 }
+
 
 // LogDeFiRules logs information about DeFi rules
 func LogDeFiRules(rules []*core.DeFiAlertRule) {

@@ -21,7 +21,6 @@ crypto-alert/
 │   ├── main.go
 │   └── notification-service
 │       └── main.go
-├── deploy.sh
 ├── docker-compose.yml
 ├── Dockerfile
 ├── frontend
@@ -60,15 +59,19 @@ crypto-alert/
 │   │   │   │   │   └── pool.json
 │   │   │   │   └── v3.go
 │   │   │   ├── defi.go
+│   │   │   ├── hyperliquid
+│   │   │   │   └── vault_v1.go
 │   │   │   ├── kamino
 │   │   │   │   └── vault_v2.go
-│   │   │   └── morpho
-│   │   │       ├── abi
-│   │   │       │   ├── erc20.json
-│   │   │       │   └── market.json
-│   │   │       ├── market_v1.go
-│   │   │       ├── vault_v1.go
-│   │   │       └── vault_v2.go
+│   │   │   ├── morpho
+│   │   │   │   ├── abi
+│   │   │   │   │   ├── erc20.json
+│   │   │   │   │   └── market.json
+│   │   │   │   ├── market_v1.go
+│   │   │   │   ├── vault_v1.go
+│   │   │   │   └── vault_v2.go
+│   │   │   └── pendle
+│   │   │       └── market_v2.go
 │   │   ├── prediction
 │   │   │   └── polymarket
 │   │   │       └── polymarket.go
@@ -98,15 +101,17 @@ crypto-alert/
 ## Web3 Data Integration
 
 
-| Type              | Oracle | Protocol / DApp | Market / Vault | Version | Chain          | Price | TVL | APY | UTILIZATION | LIQUIDITY |
-| ----------------- | ------ | --------------- | -------------- | ------- | -------------- | ----- | --- | --- | ----------- | --------- |
-| Token             | Pyth   |                 |                |         |                | ✔️    |     |     |             |           |
-| DeFi              |        | AAVE            | Market         | V3      | ETH, Base, ARB |       | ✔️  | ✔️  | ✔️          | ✔️        |
-| DeFi              |        | Morpho          | Market         | V1      | ETH, Base, ARB |       | ✔️  |     | ✔️          | ✔️        |
-| DeFi              |        | Morpho          | Vault          | V1      | ETH, Base, ARB |       | ✔️  | ✔️  | ✔️          | ✔️        |
-| DeFi              |        | Morpho          | Vault          | V2      | ETH, Base, ARB |       | ✔️  | ✔️  | ✔️          | ✔️        |
-| DeFi              |        | Kamino          | Vault          | V2      | Solana         |       | ✔️  | ✔️  | ✔️          | ✔️        |
-| Prediction Market |        | Polymarket      |                |         |                | ✔️    |     |     |             |           |
+| Type              | Oracle | Protocol / DApp   | Market / Vault | Version | Chain          | Price | TVL  | APY  | UTILIZATION | LIQUIDITY |
+| ----------------- | ------ | ----------------- | -------------- | ------- | -------------- | ----- | ---- | ---- | ----------- | --------- |
+| Token             | Pyth   |                   |                |         |                | ✔️     |      |      |             |           |
+| DeFi              |        | AAVE              | Market         | V3      | ETH, Base, ARB |       | ✔️    | ✔️    | ✔️           | ✔️         |
+| DeFi              |        | Morpho            | Market         | V1      | ETH, Base, ARB |       | ✔️    |      | ✔️           | ✔️         |
+| DeFi              |        | Morpho            | Vault          | V1      | ETH, Base, ARB |       | ✔️    | ✔️    | ✔️           | ✔️         |
+| DeFi              |        | Morpho            | Vault          | V2      | ETH, Base, ARB |       | ✔️    | ✔️    | ✔️           | ✔️         |
+| DeFi              |        | Kamino            | Vault          | V2      | Solana         |       | ✔️    | ✔️    | ✔️           | ✔️         |
+| DeFi              |        | Pendle            | PT Market      | V2      |                |       | ✔️    | ✔️    |             |           |
+| DeFi              |        | Hyperliquid Vault | Vault          |         | Hyperliquid L1 |       | ✔️    | ✔️    |             |           |
+| Prediction Market |        | Polymarket        |                |         |                | ✔️     |      |      |             |           |
 
 
 ## Message Channel Integration

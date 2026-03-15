@@ -108,6 +108,8 @@ type DeFiAlertRuleParams struct {
 	MarketContractAddress   string `json:"market_contract_address,omitempty"`   // For Morpho market: Market contract address (optional, uses default if not provided)
 	VaultTokenAddress       string `json:"vault_token_address,omitempty"`       // For Morpho vault / Kamino vault
 	DepositTokenContract    string `json:"deposit_token_contract,omitempty"`    // For Morpho vault / Kamino vault
+	// Hyperliquid-specific
+	LedgerAddress           string `json:"ledger_address,omitempty"`            // For Hyperliquid vault
 }
 
 // DeFiAlertRuleConfig represents a DeFi protocol alert rule in JSON format
@@ -365,6 +367,28 @@ func ParseDeFiRule(rc DeFiAlertRuleConfig) (*core.DeFiAlertRule, error) {
 		if rc.Params.DepositTokenContract == "" {
 			return nil, fmt.Errorf("deposit_token_contract is required for Kamino vault (in params)")
 		}
+	} else if rc.Protocol == "pendle" {
+		// Pendle requires category "pt"
+		if rc.Category != "pt" {
+			return nil, fmt.Errorf("category must be 'pt' for Pendle protocol")
+		}
+		// Pendle requires market_token_contract (the market address)
+		if rc.Params.MarketTokenContract == "" {
+			return nil, fmt.Errorf("market_token_contract is required for Pendle PT market (in params)")
+		}
+	} else if rc.Protocol == "hyperliquid" {
+		// Hyperliquid requires category "vault"
+		if rc.Category != "vault" {
+			return nil, fmt.Errorf("category must be 'vault' for Hyperliquid protocol")
+		}
+		// Hyperliquid requires ledger_address
+		if rc.Params.LedgerAddress == "" {
+			return nil, fmt.Errorf("ledger_address is required for Hyperliquid vault (in params)")
+		}
+		// Use ledger_address as MarketTokenContract for consistency
+		if rc.Params.MarketTokenContract == "" {
+			rc.Params.MarketTokenContract = rc.Params.LedgerAddress
+		}
 	} else {
 		// For other protocols (e.g., Aave), validate market token contract
 		if rc.Params.MarketTokenContract == "" {
@@ -372,8 +396,12 @@ func ParseDeFiRule(rc DeFiAlertRuleConfig) (*core.DeFiAlertRule, error) {
 		}
 	}
 
-	// Validate field
-	if rc.Field != "TVL" && rc.Field != "APY" && rc.Field != "UTILIZATION" && rc.Field != "LIQUIDITY" {
+	// Validate field — Pendle and Hyperliquid only support APY and TVL
+	if rc.Protocol == "pendle" || rc.Protocol == "hyperliquid" {
+		if rc.Field != "APY" && rc.Field != "TVL" {
+			return nil, fmt.Errorf("invalid field '%s' for %s protocol, must be one of: APY, TVL", rc.Field, rc.Protocol)
+		}
+	} else if rc.Field != "TVL" && rc.Field != "APY" && rc.Field != "UTILIZATION" && rc.Field != "LIQUIDITY" {
 		return nil, fmt.Errorf("invalid field '%s' for protocol %s %s, must be one of: TVL, APY, UTILIZATION, LIQUIDITY", rc.Field, rc.Protocol, rc.Version)
 	}
 
@@ -442,6 +470,11 @@ func ParseDeFiRule(rc DeFiAlertRuleConfig) (*core.DeFiAlertRule, error) {
 	if rc.Protocol == "kamino" {
 		rule.VaultTokenAddress = rc.Params.VaultTokenAddress
 		rule.DepositTokenContract = rc.Params.DepositTokenContract
+	}
+
+	// Set Hyperliquid-specific fields (from params)
+	if rc.Protocol == "hyperliquid" {
+		rule.LedgerAddress = rc.Params.LedgerAddress
 	}
 
 	return rule, nil

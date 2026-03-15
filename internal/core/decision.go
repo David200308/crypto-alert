@@ -78,6 +78,8 @@ type DeFiAlertRule struct {
 	MarketContractAddress   string // For Morpho market: Market contract address (optional)
 	VaultTokenAddress       string // For Morpho vault (same as MarketTokenContract)
 	DepositTokenContract    string // For Morpho vault
+	// Hyperliquid-specific fields
+	LedgerAddress           string // For Hyperliquid vault: the vault ledger address
 }
 
 // AlertDecision represents the result of evaluating an alert rule

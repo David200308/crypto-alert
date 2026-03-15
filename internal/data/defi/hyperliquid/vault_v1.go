@@ -85,37 +85,29 @@ type vaultDetailsRequest struct {
 	VaultAddress string `json:"vaultAddress"`
 }
 
-// hyperliquidVaultAPIResponse represents the Hyperliquid API response for vaultDetails
+// hyperliquidVaultAPIResponse represents the Hyperliquid API response for vaultDetails.
+// APR (apr) and TVL (portfolio[day] latest accountValue) are both available in a single call.
+// portfolio format: [[periodString, {accountValueHistory: [[timestampMs, valueStr], ...]}], ...]
 type hyperliquidVaultAPIResponse struct {
-	Name     string  `json:"name"`
-	Leader   string  `json:"leader"`
-	APR      float64 `json:"apr"`
-	IsClosed bool    `json:"isClosed"`
+	Name      string        `json:"name"`
+	Leader    string        `json:"leader"`
+	APR       float64       `json:"apr"`
+	IsClosed  bool          `json:"isClosed"`
+	Portfolio []interface{} `json:"portfolio"`
 }
 
-// clearinghouseStateRequest is the POST body for Hyperliquid clearinghouseState API
-type clearinghouseStateRequest struct {
-	Type string `json:"type"`
-	User string `json:"user"`
-}
-
-// clearinghouseStateResponse represents the relevant fields from clearinghouseState
-type clearinghouseStateResponse struct {
-	MarginSummary struct {
-		AccountValue string `json:"accountValue"`
-	} `json:"marginSummary"`
-}
-
-// postInfo sends a POST request to the Hyperliquid /info endpoint and decodes the response into dst.
-func (c *HyperliquidVaultClient) postInfo(ctx context.Context, body interface{}, dst interface{}) error {
-	bodyBytes, err := json.Marshal(body)
+// GetVaultData fetches vault data from Hyperliquid API using a single vaultDetails call.
+// APR comes from the top-level apr field.
+// TVL comes from portfolio[day] latest accountValueHistory entry — matches the app exactly.
+func (c *HyperliquidVaultClient) GetVaultData(ctx context.Context) (*VaultData, error) {
+	bodyBytes, err := json.Marshal(vaultDetailsRequest{Type: "vaultDetails", VaultAddress: c.ledgerAddress})
 	if err != nil {
-		return fmt.Errorf("failed to marshal request body: %w", err)
+		return nil, fmt.Errorf("failed to marshal request body: %w", err)
 	}
 
 	req, err := http.NewRequestWithContext(ctx, "POST", c.chainInfo.APIURL, bytes.NewReader(bodyBytes))
 	if err != nil {
-		return fmt.Errorf("failed to create HTTP request: %w", err)
+		return nil, fmt.Errorf("failed to create HTTP request: %w", err)
 	}
 
 	req.Header.Set("Content-Type", "application/json")
@@ -124,44 +116,66 @@ func (c *HyperliquidVaultClient) postInfo(ctx context.Context, body interface{},
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		return fmt.Errorf("failed to call Hyperliquid API: %w", err)
+		return nil, fmt.Errorf("failed to fetch vault data from Hyperliquid API: %w", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
 		respBytes, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("Hyperliquid API returned status %d: %s", resp.StatusCode, string(respBytes))
+		return nil, fmt.Errorf("Hyperliquid API returned status %d: %s", resp.StatusCode, string(respBytes))
 	}
 
-	if err := json.NewDecoder(resp.Body).Decode(dst); err != nil {
-		return fmt.Errorf("failed to parse Hyperliquid API response: %w", err)
-	}
-	return nil
-}
-
-// GetVaultData fetches vault data from Hyperliquid API.
-// APR comes from vaultDetails; TVL comes from clearinghouseState.accountValue.
-func (c *HyperliquidVaultClient) GetVaultData(ctx context.Context) (*VaultData, error) {
-	// Fetch APR via vaultDetails
-	var vaultResp hyperliquidVaultAPIResponse
-	if err := c.postInfo(ctx, vaultDetailsRequest{Type: "vaultDetails", VaultAddress: c.ledgerAddress}, &vaultResp); err != nil {
-		return nil, fmt.Errorf("vaultDetails: %w", err)
+	var apiResp hyperliquidVaultAPIResponse
+	if err := json.NewDecoder(resp.Body).Decode(&apiResp); err != nil {
+		return nil, fmt.Errorf("failed to parse Hyperliquid API response: %w", err)
 	}
 
-	// Fetch TVL via clearinghouseState (marginSummary.accountValue is the vault's total equity in USD)
-	var stateResp clearinghouseStateResponse
-	if err := c.postInfo(ctx, clearinghouseStateRequest{Type: "clearinghouseState", User: c.ledgerAddress}, &stateResp); err != nil {
-		return nil, fmt.Errorf("clearinghouseState: %w", err)
-	}
-
-	tvl, _ := strconv.ParseFloat(stateResp.MarginSummary.AccountValue, 64)
+	// TVL = latest accountValue from portfolio[period="day"].accountValueHistory
+	// This is the same value shown in the Hyperliquid app and works for both parent and child vaults.
+	tvl := latestAccountValueFromPortfolio(apiResp.Portfolio)
 
 	return &VaultData{
-		Name:   vaultResp.Name,
-		APR:    vaultResp.APR * 100, // Convert decimal to percentage (0.15 → 15.0)
+		Name:   apiResp.Name,
+		APR:    apiResp.APR * 100, // Convert decimal to percentage (0.06 → 6.0)
 		TVL:    tvl,
-		Closed: vaultResp.IsClosed,
+		Closed: apiResp.IsClosed,
 	}, nil
+}
+
+// latestAccountValueFromPortfolio extracts the most recent accountValue from the portfolio field.
+// portfolio structure: [[periodString, {accountValueHistory: [[timestampMs, valueStr], ...]}], ...]
+// We use the "day" period and take the last entry, which matches what the app displays.
+func latestAccountValueFromPortfolio(portfolio []interface{}) float64 {
+	for _, entry := range portfolio {
+		pair, ok := entry.([]interface{})
+		if !ok || len(pair) < 2 {
+			continue
+		}
+		period, ok := pair[0].(string)
+		if !ok || period != "day" {
+			continue
+		}
+		periodData, ok := pair[1].(map[string]interface{})
+		if !ok {
+			continue
+		}
+		history, ok := periodData["accountValueHistory"].([]interface{})
+		if !ok || len(history) == 0 {
+			continue
+		}
+		// Take the last (most recent) entry: [timestampMs, valueStr]
+		last, ok := history[len(history)-1].([]interface{})
+		if !ok || len(last) < 2 {
+			continue
+		}
+		valStr, ok := last[1].(string)
+		if !ok {
+			continue
+		}
+		tvl, _ := strconv.ParseFloat(valStr, 64)
+		return tvl
+	}
+	return 0
 }
 
 // GetFieldValue retrieves the value for a specific field (APY or TVL)

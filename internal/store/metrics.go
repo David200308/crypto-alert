@@ -75,7 +75,10 @@ func (s *MetricStore) GetMetricHistory(metricType, identifier, field string, sin
 		if err := rows.Scan(&value, &ts); err != nil {
 			return nil, err
 		}
-		t, err := time.Parse("2006-01-02 15:04:05", string(ts))
+		t, err := time.Parse(time.RFC3339, string(ts))
+		if err != nil {
+			t, err = time.Parse("2006-01-02 15:04:05", string(ts))
+		}
 		if err != nil {
 			return nil, fmt.Errorf("parse recorded_at %q: %w", string(ts), err)
 		}

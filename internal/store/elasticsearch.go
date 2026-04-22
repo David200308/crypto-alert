@@ -48,9 +48,9 @@ func (c *ESClient) GetDates(ctx context.Context) ([]string, error) {
 		"aggs": map[string]interface{}{
 			"by_day": map[string]interface{}{
 				"date_histogram": map[string]interface{}{
-					"field":    "@timestamp",
-					"interval": "day",
-					"format":   "yyyyMMdd",
+					"field":          "@timestamp",
+					"calendar_interval": "day",
+					"format":         "yyyyMMdd",
 				},
 			},
 		},

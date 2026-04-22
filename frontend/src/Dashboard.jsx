@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend,
 } from 'recharts'
-import { BarChart3, Loader, AlertCircle } from 'lucide-react'
+import { BarChart3, Loader, AlertCircle, ChevronDown, ChevronRight } from 'lucide-react'
 
 const TIME_RANGES = [
   { label: '1H',  value: '1h'  },
@@ -38,7 +38,7 @@ function formatValue(value, field) {
     return `$${value.toFixed(4)}`
   }
   if (f === 'APY' || f === 'UTILIZATION') {
-    return `${(value * 100).toFixed(2)}%`
+    return `${value.toFixed(2)}%`
   }
   if (f === 'MIDPOINT' || f === 'BUY' || f === 'SELL') {
     return `${(value * 100).toFixed(2)}%`
@@ -194,6 +194,24 @@ function MetricCard({ metric, range }) {
   )
 }
 
+function CollapsibleSection({ title, children, defaultOpen = true }) {
+  const [open, setOpen] = useState(defaultOpen)
+  return (
+    <section className="mb-8">
+      <button
+        onClick={() => setOpen(o => !o)}
+        className="flex items-center gap-2 mb-4 text-dark-text-muted text-xs font-semibold uppercase tracking-widest hover:text-dark-text transition-colors w-full text-left"
+      >
+        {open
+          ? <ChevronDown className="w-3.5 h-3.5 shrink-0" />
+          : <ChevronRight className="w-3.5 h-3.5 shrink-0" />}
+        {title}
+      </button>
+      {open && children}
+    </section>
+  )
+}
+
 export default function Dashboard() {
   const [metrics, setMetrics] = useState([])
   const [range, setRange]     = useState('1d')
@@ -263,12 +281,8 @@ export default function Dashboard() {
           </div>
         )}
 
-        {/* Token prices */}
         {tokenMetrics.length > 0 && (
-          <section className="mb-8">
-            <h2 className="text-dark-text-muted text-xs font-semibold uppercase tracking-widest mb-4">
-              Token Prices
-            </h2>
+          <CollapsibleSection title="Token Prices">
             <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
               {tokenMetrics.map(m => (
                 <MetricCard
@@ -278,15 +292,11 @@ export default function Dashboard() {
                 />
               ))}
             </div>
-          </section>
+          </CollapsibleSection>
         )}
 
-        {/* DeFi metrics */}
         {defiMetrics.length > 0 && (
-          <section className="mb-8">
-            <h2 className="text-dark-text-muted text-xs font-semibold uppercase tracking-widest mb-4">
-              DeFi Protocols
-            </h2>
+          <CollapsibleSection title="DeFi Protocols">
             <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
               {defiMetrics.map(m => (
                 <MetricCard
@@ -296,15 +306,11 @@ export default function Dashboard() {
                 />
               ))}
             </div>
-          </section>
+          </CollapsibleSection>
         )}
 
-        {/* Prediction markets */}
         {predictMetrics.length > 0 && (
-          <section className="mb-8">
-            <h2 className="text-dark-text-muted text-xs font-semibold uppercase tracking-widest mb-4">
-              Prediction Markets
-            </h2>
+          <CollapsibleSection title="Prediction Markets">
             <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
               {predictMetrics.map(m => (
                 <MetricCard
@@ -314,7 +320,7 @@ export default function Dashboard() {
                 />
               ))}
             </div>
-          </section>
+          </CollapsibleSection>
         )}
       </div>
     </div>

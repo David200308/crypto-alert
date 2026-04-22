@@ -3,7 +3,7 @@ import { RefreshCw, Calendar, AlertCircle, Loader, Search, BarChart3, ScrollText
 import Dashboard from './Dashboard'
 
 function App() {
-  const [view, setView]                     = useState('logs')  // 'logs' | 'dashboard'
+  const [view, setView]                     = useState('dashboard')  // 'logs' | 'dashboard'
   const [logs, setLogs]                     = useState([])
   const [selectedDate, setSelectedDate]     = useState('')
   const [availableDates, setAvailableDates] = useState([])

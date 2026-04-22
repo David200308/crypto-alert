@@ -86,9 +86,14 @@ services:
       ES_ENABLED: "true"
       ES_ADDRESSES: http://es01:9200
       ES_INDEX: crypto-alert-logs
+      MYSQL_USER: ${MYSQL_USER:-cryptoalert}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-cryptoalert}
+      MYSQL_DB: ${MYSQL_DB:-web3}
     volumes:
       - log-data:/app/logs
     depends_on:
+      mysql:
+        condition: service_healthy
       es01:
         condition: service_healthy
     restart: unless-stopped

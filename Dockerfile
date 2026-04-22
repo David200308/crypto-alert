@@ -22,5 +22,8 @@ WORKDIR /app
 COPY --from=builder /app/bin/crypto-alert /app/
 COPY --from=builder /app/bin/log-api /app/
 COPY --from=builder /app/bin/notification-service /app/
-# Default command (override in compose for each service)
+COPY docker-entrypoint.sh /app/docker-entrypoint.sh
+RUN chmod +x /app/docker-entrypoint.sh
+
+ENTRYPOINT ["/app/docker-entrypoint.sh"]
 CMD ["./crypto-alert"]

@@ -1,0 +1,349 @@
+#!/usr/bin/env bash
+# setup.sh — interactive setup for crypto-alert
+# Supports two modes:
+#   local  → writes .env, runs: docker compose up --build
+#   prod   → writes secrets/, runs: docker compose -f docker-compose.prod.yml up -d --build
+set -euo pipefail
+
+# ── colours ───────────────────────────────────────────────────────────────────
+BOLD='\033[1m'
+DIM='\033[2m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+CYAN='\033[0;36m'
+RED='\033[0;31m'
+NC='\033[0m'
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# ── prerequisites ─────────────────────────────────────────────────────────────
+missing=()
+command -v docker  >/dev/null 2>&1 || missing+=("docker")
+command -v openssl >/dev/null 2>&1 || missing+=("openssl")
+
+if docker compose version >/dev/null 2>&1; then
+  COMPOSE="docker compose"
+elif command -v docker-compose >/dev/null 2>&1; then
+  COMPOSE="docker-compose"
+else
+  missing+=("docker compose (install Docker Desktop or the Compose plugin)")
+fi
+
+if [ ${#missing[@]} -gt 0 ]; then
+  echo -e "${RED}Error: missing required tools:${NC}"
+  for t in "${missing[@]}"; do echo -e "  ${RED}·${NC} $t"; done
+  exit 1
+fi
+
+# ── helpers ───────────────────────────────────────────────────────────────────
+
+header() {
+  echo ""
+  echo -e "${BOLD}${CYAN}$1${NC}"
+  printf '%0.s─' $(seq 1 ${#1})
+  echo ""
+}
+
+# prompt VAR "Label" "default" [secret]
+prompt() {
+  local __var="$1" label="$2" default="${3:-}" secret="${4:-false}"
+  local display_default="" value=""
+  [ -n "$default" ] && display_default=" ${DIM}[$default]${NC}"
+
+  if [ "$secret" = "true" ]; then
+    printf "  %s%b: " "$label" "$display_default"
+    read -rs value; echo ""
+  else
+    printf "  %s%b: " "$label" "$display_default"
+    read -r value
+  fi
+
+  [ -z "$value" ] && value="$default"
+  printf -v "$__var" '%s' "$value"
+}
+
+# confirm "Question" → returns 0 (yes) or 1 (no)
+confirm() {
+  local answer
+  printf "  %s ${DIM}[y/N]${NC}: " "$1"
+  read -r answer
+  [[ "$answer" =~ ^[Yy]$ ]]
+}
+
+check_conflict() {
+  local path="$1"
+  if [ -e "$path" ]; then
+    echo ""
+    echo -e "  ${YELLOW}⚠  $path already exists.${NC}"
+    if ! confirm "Overwrite?"; then
+      echo -e "  ${RED}Aborted.${NC}"
+      exit 1
+    fi
+  fi
+}
+
+# ── banner ────────────────────────────────────────────────────────────────────
+clear
+echo ""
+echo -e "${BOLD}  Crypto Alert — Setup${NC}"
+echo -e "  ${DIM}Pyth · Kafka · MySQL · Elasticsearch${NC}"
+echo ""
+
+# ── mode selection ────────────────────────────────────────────────────────────
+echo -e "  Select a mode:"
+echo -e "    ${BOLD}1${NC}) ${GREEN}local${NC}  — .env file          (development)"
+echo -e "    ${BOLD}2${NC}) ${YELLOW}prod${NC}   — Docker secrets      (server)"
+echo ""
+printf "  Choice [1/2]: "
+read -r mode_choice
+
+case "$mode_choice" in
+  1|local|dev) MODE=local ;;
+  2|prod)      MODE=prod  ;;
+  *)
+    echo -e "${RED}Invalid choice. Enter 1 or 2.${NC}"
+    exit 1
+    ;;
+esac
+
+echo ""
+echo -e "  Mode: ${BOLD}$MODE${NC}"
+
+# ══════════════════════════════════════════════════════════════════════════════
+# ── LOCAL MODE ────────────────────────────────────────────────────────────────
+# ══════════════════════════════════════════════════════════════════════════════
+if [ "$MODE" = "local" ]; then
+  ENV_FILE="$SCRIPT_DIR/.env"
+  check_conflict "$ENV_FILE"
+
+  # ── MySQL ──────────────────────────────────────────────────────────────────
+  header "MySQL"
+  prompt MYSQL_ROOT_PASSWORD "Root password"  "rootpassword" true
+  prompt MYSQL_DB            "Database name"  "web3"
+  prompt MYSQL_USER          "Database user"  "cryptoalert"
+  prompt MYSQL_PASSWORD      "User password"  "cryptoalert"  true
+  MYSQL_DSN="${MYSQL_USER}:${MYSQL_PASSWORD}@tcp(mysql:3306)/${MYSQL_DB}?parseTime=true"
+
+  # ── Pyth Oracle ────────────────────────────────────────────────────────────
+  header "Pyth Oracle"
+  prompt PYTH_API_URL "API URL" "https://hermes.pyth.network"
+  prompt PYTH_API_KEY "API key (leave blank if none)" "" true
+
+  # ── Notifications ──────────────────────────────────────────────────────────
+  header "Notifications"
+  prompt RESEND_API_KEY    "Resend API key (leave blank to skip email)" "" true
+  prompt RESEND_FROM_EMAIL "From email"                                 "alerts@yourdomain.com"
+  prompt TELEGRAM_BOT_TOKEN "Telegram bot token (leave blank to skip)" "" true
+
+  # ── RPC URLs ───────────────────────────────────────────────────────────────
+  header "RPC URLs  ${DIM}(leave blank to skip)${NC}"
+  prompt ETH_RPC_URL    "Ethereum RPC URL"  ""
+  prompt BASE_RPC_URL   "Base RPC URL"      ""
+  prompt ARB_RPC_URL    "Arbitrum RPC URL"  ""
+  prompt SOLANA_RPC_URL "Solana RPC URL"    ""
+
+  # ── Settings ───────────────────────────────────────────────────────────────
+  header "Settings"
+  prompt CHECK_INTERVAL "Check interval (seconds)" "60"
+
+  # ── Write .env ─────────────────────────────────────────────────────────────
+  cat > "$ENV_FILE" <<EOF
+# Generated by setup.sh — $(date)
+
+# ── MySQL ─────────────────────────────────────────────────────────────────────
+MYSQL_ROOT_PASSWORD=$MYSQL_ROOT_PASSWORD
+MYSQL_DB=$MYSQL_DB
+MYSQL_USER=$MYSQL_USER
+MYSQL_PASSWORD=$MYSQL_PASSWORD
+MYSQL_DSN=$MYSQL_DSN
+
+# ── Pyth Oracle ───────────────────────────────────────────────────────────────
+PYTH_API_URL=$PYTH_API_URL
+PYTH_API_KEY=$PYTH_API_KEY
+
+# ── Notifications ─────────────────────────────────────────────────────────────
+RESEND_API_KEY=$RESEND_API_KEY
+RESEND_FROM_EMAIL=$RESEND_FROM_EMAIL
+TELEGRAM_BOT_TOKEN=$TELEGRAM_BOT_TOKEN
+
+# ── RPC URLs ──────────────────────────────────────────────────────────────────
+ETH_RPC_URL=$ETH_RPC_URL
+BASE_RPC_URL=$BASE_RPC_URL
+ARB_RPC_URL=$ARB_RPC_URL
+SOLANA_RPC_URL=$SOLANA_RPC_URL
+
+# ── Settings ──────────────────────────────────────────────────────────────────
+CHECK_INTERVAL=$CHECK_INTERVAL
+EOF
+
+  echo ""
+  echo -e "  ${GREEN}✓${NC}  Written: .env"
+
+  # ── Launch ─────────────────────────────────────────────────────────────────
+  echo ""
+  echo -e "  How would you like to start?"
+  echo -e "    ${BOLD}1${NC}) Build images from source  ${DIM}($COMPOSE up --build)${NC}"
+  echo -e "    ${BOLD}2${NC}) Start with existing images ${DIM}($COMPOSE up)${NC}"
+  echo -e "    ${BOLD}3${NC}) Skip — I'll start manually"
+  echo ""
+  printf "  Choice [1/2/3]: "
+  read -r launch_choice
+
+  echo ""
+  cd "$SCRIPT_DIR"
+  case "$launch_choice" in
+    1) $COMPOSE up --build ;;
+    2) $COMPOSE up ;;
+    3)
+      echo -e "  Run manually:"
+      echo -e "    Build:  ${BOLD}$COMPOSE up --build${NC}"
+      echo -e "    Start:  ${BOLD}$COMPOSE up${NC}"
+      ;;
+    *)
+      echo -e "  ${YELLOW}Invalid choice — skipping launch.${NC}"
+      echo -e "  Run manually:"
+      echo -e "    Build:  ${BOLD}$COMPOSE up --build${NC}"
+      echo -e "    Start:  ${BOLD}$COMPOSE up${NC}"
+      ;;
+  esac
+
+# ══════════════════════════════════════════════════════════════════════════════
+# ── PROD MODE ─────────────────────────────────────────────────────────────────
+# ══════════════════════════════════════════════════════════════════════════════
+else
+  SECRETS_DIR="$SCRIPT_DIR/secrets"
+  PROD_ENV="$SCRIPT_DIR/.env.prod"
+  SKIP_PROMPTS=false
+
+  if [ -d "$SECRETS_DIR" ] && [ "$(ls -A "$SECRETS_DIR" 2>/dev/null | grep -v '\.gitkeep')" ]; then
+    echo ""
+    echo -e "  ${YELLOW}⚠  secrets/ already contains files.${NC}"
+    if confirm "Overwrite all secrets?"; then
+      SKIP_PROMPTS=false
+    else
+      if [ ! -f "$PROD_ENV" ]; then
+        echo -e "  ${RED}Error: secrets/ exists but .env.prod is missing.${NC}"
+        echo -e "  ${RED}Re-run setup and overwrite to regenerate both.${NC}"
+        exit 1
+      fi
+      SKIP_PROMPTS=true
+    fi
+  fi
+
+  mkdir -p "$SECRETS_DIR"
+
+  write_secret() {
+    local name="$1" value="$2"
+    printf '%s' "$value" > "$SECRETS_DIR/$name"
+    chmod 600 "$SECRETS_DIR/$name"
+  }
+
+  if [ "$SKIP_PROMPTS" = true ]; then
+    echo -e "  ${GREEN}✓${NC}  Using existing secrets and .env.prod"
+  else
+
+    # ── MySQL ────────────────────────────────────────────────────────────────
+    header "MySQL"
+    prompt MYSQL_ROOT_PASSWORD "Root password"  "" true
+    prompt MYSQL_DB            "Database name"  "web3"
+    prompt MYSQL_USER          "Database user"  "cryptoalert"
+    prompt MYSQL_PASSWORD      "User password"  "" true
+
+    write_secret mysql_root_password "$MYSQL_ROOT_PASSWORD"
+    write_secret mysql_password      "$MYSQL_PASSWORD"
+
+    # ── Pyth Oracle ──────────────────────────────────────────────────────────
+    header "Pyth Oracle"
+    prompt PYTH_API_URL "API URL" "https://hermes.pyth.network"
+    prompt PYTH_API_KEY "API key (leave blank if none)" "" true
+    write_secret pyth_api_key "$PYTH_API_KEY"
+
+    # ── Notifications ────────────────────────────────────────────────────────
+    header "Notifications"
+    prompt RESEND_API_KEY    "Resend API key (leave blank to skip email)" "" true
+    prompt RESEND_FROM_EMAIL "From email"                                 "alerts@yourdomain.com"
+    prompt TELEGRAM_BOT_TOKEN "Telegram bot token (leave blank to skip)" "" true
+
+    write_secret resend_api_key    "$RESEND_API_KEY"
+    write_secret telegram_bot_token "$TELEGRAM_BOT_TOKEN"
+
+    # ── RPC URLs ──────────────────────────────────────────────────────────────
+    header "RPC URLs  ${DIM}(leave blank to skip)${NC}"
+    prompt ETH_RPC_URL    "Ethereum RPC URL"  ""
+    prompt BASE_RPC_URL   "Base RPC URL"      ""
+    prompt ARB_RPC_URL    "Arbitrum RPC URL"  ""
+    prompt SOLANA_RPC_URL "Solana RPC URL"    ""
+
+    write_secret eth_rpc_url    "$ETH_RPC_URL"
+    write_secret base_rpc_url   "$BASE_RPC_URL"
+    write_secret arb_rpc_url    "$ARB_RPC_URL"
+    write_secret solana_rpc_url "$SOLANA_RPC_URL"
+
+    # ── Settings ──────────────────────────────────────────────────────────────
+    header "Settings"
+    prompt CHECK_INTERVAL "Check interval (seconds)" "60"
+
+    # ── Summary ───────────────────────────────────────────────────────────────
+    echo ""
+    echo -e "  ${GREEN}✓${NC}  Secrets written to secrets/ (chmod 600)"
+    echo -e "  ${DIM}"
+    ls "$SECRETS_DIR" | grep -v '\.gitkeep' | while read -r f; do
+      size=$(wc -c < "$SECRETS_DIR/$f")
+      if [ "$size" -gt 0 ]; then
+        echo "     secrets/$f  (${size}B)"
+      else
+        echo "     secrets/$f  (empty — unused)"
+      fi
+    done
+    echo -e "  ${NC}"
+
+    # ── Write .env.prod ───────────────────────────────────────────────────────
+    cat > "$PROD_ENV" <<EOF
+# Non-secret config for docker-compose.prod.yml — generated by setup.sh $(date)
+# Usage: $COMPOSE --env-file .env.prod -f docker-compose.prod.yml up -d --build
+
+MYSQL_DB=$MYSQL_DB
+MYSQL_USER=$MYSQL_USER
+
+PYTH_API_URL=$PYTH_API_URL
+RESEND_FROM_EMAIL=$RESEND_FROM_EMAIL
+CHECK_INTERVAL=$CHECK_INTERVAL
+EOF
+
+    chmod 600 "$PROD_ENV"
+    echo -e "  ${GREEN}✓${NC}  Non-secret config written: .env.prod"
+
+  fi  # end SKIP_PROMPTS=false block
+
+  # ── Launch ─────────────────────────────────────────────────────────────────
+  echo ""
+  echo -e "  How would you like to start?"
+  echo -e "    ${BOLD}1${NC}) Build images from source  ${DIM}($COMPOSE -f docker-compose.prod.yml up -d --build)${NC}"
+  echo -e "    ${BOLD}2${NC}) Start with existing images ${DIM}($COMPOSE -f docker-compose.prod.yml up -d)${NC}"
+  echo -e "    ${BOLD}3${NC}) Skip — I'll start manually"
+  echo ""
+  printf "  Choice [1/2/3]: "
+  read -r launch_choice
+
+  echo ""
+  cd "$SCRIPT_DIR"
+  case "$launch_choice" in
+    1) $COMPOSE --env-file .env.prod -f docker-compose.prod.yml up -d --build ;;
+    2) $COMPOSE --env-file .env.prod -f docker-compose.prod.yml up -d ;;
+    3)
+      echo -e "  Run manually:"
+      echo -e "    Build:  ${BOLD}$COMPOSE --env-file .env.prod -f docker-compose.prod.yml up -d --build${NC}"
+      echo -e "    Start:  ${BOLD}$COMPOSE --env-file .env.prod -f docker-compose.prod.yml up -d${NC}"
+      ;;
+    *)
+      echo -e "  ${YELLOW}Invalid choice — skipping launch.${NC}"
+      echo -e "  Run manually:"
+      echo -e "    Build:  ${BOLD}$COMPOSE --env-file .env.prod -f docker-compose.prod.yml up -d --build${NC}"
+      echo -e "    Start:  ${BOLD}$COMPOSE --env-file .env.prod -f docker-compose.prod.yml up -d${NC}"
+      ;;
+  esac
+fi
+
+echo ""
+echo -e "  ${GREEN}Done.${NC}"
+echo ""

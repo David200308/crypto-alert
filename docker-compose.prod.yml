@@ -1,11 +1,29 @@
+secrets:
+  mysql_root_password:
+    file: ./secrets/mysql_root_password
+  mysql_password:
+    file: ./secrets/mysql_password
+  pyth_api_key:
+    file: ./secrets/pyth_api_key
+  resend_api_key:
+    file: ./secrets/resend_api_key
+  telegram_bot_token:
+    file: ./secrets/telegram_bot_token
+  eth_rpc_url:
+    file: ./secrets/eth_rpc_url
+  base_rpc_url:
+    file: ./secrets/base_rpc_url
+  arb_rpc_url:
+    file: ./secrets/arb_rpc_url
+  solana_rpc_url:
+    file: ./secrets/solana_rpc_url
+
 services:
   kafka:
     image: apache/kafka:3.9.2
     container_name: crypto-alert-kafka
     networks:
       - crypto-alert-net
-    ports:
-      - "9092:9092"
     environment:
       KAFKA_NODE_ID: 1
       KAFKA_PROCESS_ROLES: broker,controller
@@ -30,12 +48,15 @@ services:
     networks:
       - crypto-alert-net
     ports:
-      - "3306:3306"
+      - "127.0.0.1:3306:3306"
     environment:
-      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-rootpassword}
+      MYSQL_ROOT_PASSWORD_FILE: /run/secrets/mysql_root_password
       MYSQL_DATABASE: ${MYSQL_DB:-web3}
       MYSQL_USER: ${MYSQL_USER:-cryptoalert}
-      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-cryptoalert}
+      MYSQL_PASSWORD_FILE: /run/secrets/mysql_password
+    secrets:
+      - mysql_root_password
+      - mysql_password
     volumes:
       - mysql-data:/var/lib/mysql
       - ./sql/alert_rules_schema.sql:/docker-entrypoint-initdb.d/01_alert_rules_schema.sql:ro
@@ -52,8 +73,6 @@ services:
     container_name: es01
     networks:
       - crypto-alert-net
-    ports:
-      - "9200:9200"
     environment:
       - discovery.type=single-node
       - xpack.security.enabled=false
@@ -79,7 +98,7 @@ services:
     networks:
       - crypto-alert-net
     ports:
-      - "8181:8181"
+      - "127.0.0.1:8181:8181"
     environment:
       API_PORT: "8181"
       LOG_DIR: /app/logs
@@ -108,8 +127,20 @@ services:
       ES_ADDRESSES: http://es01:9200
       ES_INDEX: crypto-alert-logs
       KAFKA_BROKERS: kafka:9092
-    env_file:
-      - .env
+      MYSQL_USER: ${MYSQL_USER:-cryptoalert}
+      MYSQL_DB: ${MYSQL_DB:-web3}
+      PYTH_API_URL: ${PYTH_API_URL:-https://hermes.pyth.network}
+      RESEND_FROM_EMAIL: ${RESEND_FROM_EMAIL:-}
+      CHECK_INTERVAL: ${CHECK_INTERVAL:-60}
+    secrets:
+      - mysql_password
+      - pyth_api_key
+      - resend_api_key
+      - telegram_bot_token
+      - eth_rpc_url
+      - base_rpc_url
+      - arb_rpc_url
+      - solana_rpc_url
     volumes:
       - log-data:/app/logs
     depends_on:
@@ -132,8 +163,10 @@ services:
       - crypto-alert-net
     environment:
       KAFKA_BROKERS: kafka:9092
-    env_file:
-      - .env
+      RESEND_FROM_EMAIL: ${RESEND_FROM_EMAIL:-}
+    secrets:
+      - resend_api_key
+      - telegram_bot_token
     depends_on:
       kafka:
         condition: service_healthy

@@ -47,6 +47,16 @@ func main() {
 	var emailSender message.MessageSender = kafkaPublisher
 	log.Printf("📨 Kafka publisher connected to brokers: %v", cfg.KafkaBrokers)
 
+	// Initialize metric store for dashboard time-series data
+	metricStore, err := store.NewMetricStore(cfg.MySQLDSN)
+	if err != nil {
+		log.Printf("⚠️  MetricStore disabled (dashboard charts unavailable): %v", err)
+		metricStore = nil
+	} else {
+		defer metricStore.Close()
+		log.Println("📈 MetricStore connected — dashboard data will be recorded")
+	}
+
 	// Load alert rules from MySQL
 	if err := loadAlertRulesFromMySQL(decisionEngine, cfg.MySQLDSN); err != nil {
 		log.Fatalf("Failed to load alert rules from MySQL: %v", err)
@@ -66,9 +76,9 @@ func main() {
 	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
 
 	// Start the alert monitoring loops
-	go monitorPrices(ctx, pythClient, decisionEngine, emailSender, cfg)
-	go monitorDeFi(ctx, decisionEngine, emailSender, cfg)
-	go monitorPredictMarkets(ctx, decisionEngine, emailSender, cfg)
+	go monitorPrices(ctx, pythClient, decisionEngine, emailSender, metricStore, cfg)
+	go monitorDeFi(ctx, decisionEngine, emailSender, metricStore, cfg)
+	go monitorPredictMarkets(ctx, decisionEngine, emailSender, metricStore, cfg)
 
 	// Start hot-reload loop (periodically re-reads rules from MySQL without restart)
 	if cfg.RuleReloadInterval > 0 {
@@ -124,13 +134,14 @@ func monitorPrices(
 	pythClient *price.PythClient,
 	decisionEngine *core.DecisionEngine,
 	sender message.MessageSender,
+	metricStore *store.MetricStore,
 	cfg *config.Config,
 ) {
 	ticker := time.NewTicker(time.Duration(cfg.CheckInterval) * time.Second)
 	defer ticker.Stop()
 
 	// Run immediately on startup
-	if err := checkAndAlert(ctx, pythClient, decisionEngine, sender); err != nil {
+	if err := checkAndAlert(ctx, pythClient, decisionEngine, sender, metricStore); err != nil {
 		log.Printf("Error checking prices: %v", err)
 	}
 
@@ -139,7 +150,7 @@ func monitorPrices(
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			if err := checkAndAlert(ctx, pythClient, decisionEngine, sender); err != nil {
+			if err := checkAndAlert(ctx, pythClient, decisionEngine, sender, metricStore); err != nil {
 				log.Printf("Error checking prices: %v", err)
 			}
 		}
@@ -152,6 +163,7 @@ func checkAndAlert(
 	pythClient *price.PythClient,
 	decisionEngine *core.DecisionEngine,
 	sender message.MessageSender,
+	metricStore *store.MetricStore,
 ) error {
 	// Build symbol to price feed ID mapping from alert rules
 	rules := decisionEngine.GetRules()
@@ -176,13 +188,18 @@ func checkAndAlert(
 		return fmt.Errorf("failed to fetch prices: %w", err)
 	}
 
-	// Display current prices
+	// Display current prices and store snapshots
 	for symbol, priceData := range prices {
 		if err := priceData.Validate(); err != nil {
 			log.Printf("⚠️  Invalid price data for %s: %v", symbol, err)
 			continue
 		}
 		log.Printf("💰 %s: $%g", symbol, priceData.Price)
+		if metricStore != nil {
+			if err := metricStore.InsertMetricSnapshot("token", symbol, symbol, "price", priceData.Price); err != nil {
+				log.Printf("⚠️  Failed to store price metric for %s: %v", symbol, err)
+			}
+		}
 	}
 
 	// Evaluate alert rules
@@ -208,13 +225,14 @@ func monitorDeFi(
 	ctx context.Context,
 	decisionEngine *core.DecisionEngine,
 	sender message.MessageSender,
+	metricStore *store.MetricStore,
 	cfg *config.Config,
 ) {
 	ticker := time.NewTicker(time.Duration(cfg.CheckInterval) * time.Second)
 	defer ticker.Stop()
 
 	// Run immediately on startup
-	if err := checkAndAlertDeFi(ctx, decisionEngine, sender); err != nil {
+	if err := checkAndAlertDeFi(ctx, decisionEngine, sender, metricStore); err != nil {
 		log.Printf("Error checking DeFi: %v", err)
 	}
 
@@ -223,7 +241,7 @@ func monitorDeFi(
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			if err := checkAndAlertDeFi(ctx, decisionEngine, sender); err != nil {
+			if err := checkAndAlertDeFi(ctx, decisionEngine, sender, metricStore); err != nil {
 				log.Printf("Error checking DeFi: %v", err)
 			}
 		}
@@ -235,6 +253,7 @@ func checkAndAlertDeFi(
 	ctx context.Context,
 	decisionEngine *core.DecisionEngine,
 	sender message.MessageSender,
+	metricStore *store.MetricStore,
 ) error {
 	defiRules := decisionEngine.GetDeFiRules()
 	if len(defiRules) == 0 {
@@ -260,6 +279,15 @@ func checkAndAlertDeFi(
 		categoryStr := defi.GetCategoryString(rule)
 		displayName := defi.GetDisplayName(rule)
 		log.Printf("💰 %s%s %s on %s - %s%s: %g", rule.Protocol, categoryStr, rule.Version, chainName, rule.Field, displayName, value)
+
+		if metricStore != nil {
+			rawID := defi.GetIdentifier(rule)
+			defiIdentifier := fmt.Sprintf("%s-%s-%s-%s", rule.Protocol, rule.Version, rule.ChainID, rawID)
+			label := fmt.Sprintf("%s%s %s%s on %s", rule.Protocol, categoryStr, rule.Version, displayName, chainName)
+			if err := metricStore.InsertMetricSnapshot("defi", defiIdentifier, label, rule.Field, value); err != nil {
+				log.Printf("⚠️  Failed to store DeFi metric: %v", err)
+			}
+		}
 
 		// Evaluate alert rules
 		identifier := defi.GetIdentifier(rule)
@@ -308,13 +336,14 @@ func monitorPredictMarkets(
 	ctx context.Context,
 	decisionEngine *core.DecisionEngine,
 	sender message.MessageSender,
+	metricStore *store.MetricStore,
 	cfg *config.Config,
 ) {
 	ticker := time.NewTicker(time.Duration(cfg.CheckInterval) * time.Second)
 	defer ticker.Stop()
 
 	// Run immediately on startup
-	if err := checkAndAlertPredictMarkets(ctx, decisionEngine, sender); err != nil {
+	if err := checkAndAlertPredictMarkets(ctx, decisionEngine, sender, metricStore); err != nil {
 		log.Printf("Error checking prediction markets: %v", err)
 	}
 
@@ -323,7 +352,7 @@ func monitorPredictMarkets(
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			if err := checkAndAlertPredictMarkets(ctx, decisionEngine, sender); err != nil {
+			if err := checkAndAlertPredictMarkets(ctx, decisionEngine, sender, metricStore); err != nil {
 				log.Printf("Error checking prediction markets: %v", err)
 			}
 		}
@@ -335,6 +364,7 @@ func checkAndAlertPredictMarkets(
 	ctx context.Context,
 	decisionEngine *core.DecisionEngine,
 	sender message.MessageSender,
+	metricStore *store.MetricStore,
 ) error {
 	rules := decisionEngine.GetPredictMarketRules()
 	if len(rules) == 0 {
@@ -378,6 +408,13 @@ func checkAndAlertPredictMarkets(
 
 		log.Printf("💰 [%s] [%s] %s - midpoint=%.4f buy=%.4f sell=%.4f",
 			rule.PredictMarket, rule.Outcome, rule.Question, tp.Midpoint, tp.BuyPrice, tp.SellPrice)
+
+		if metricStore != nil {
+			label := fmt.Sprintf("%s (%s)", rule.Question, rule.Outcome)
+			metricStore.InsertMetricSnapshot("predict", rule.TokenID, label, "MIDPOINT", tp.Midpoint)
+			metricStore.InsertMetricSnapshot("predict", rule.TokenID, label, "BUY", tp.BuyPrice)
+			metricStore.InsertMetricSnapshot("predict", rule.TokenID, label, "SELL", tp.SellPrice)
+		}
 
 		decisions := decisionEngine.EvaluatePredictMarket(rule.TokenID, tp.Midpoint, tp.BuyPrice, tp.SellPrice)
 		for _, decision := range decisions {

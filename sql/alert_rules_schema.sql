@@ -46,3 +46,15 @@ CREATE TABLE IF NOT EXISTS alert_rule_predict_market_config (
   recipient_email  VARCHAR(255) DEFAULT NULL,
   telegram_chat_id VARCHAR(64) DEFAULT NULL
 );
+
+-- Time-series snapshots for dashboard charts
+CREATE TABLE IF NOT EXISTS metric_snapshots (
+  id          BIGINT AUTO_INCREMENT PRIMARY KEY,
+  type        VARCHAR(32) NOT NULL,
+  identifier  VARCHAR(256) NOT NULL,
+  label       VARCHAR(256) NOT NULL DEFAULT '',
+  field       VARCHAR(64) NOT NULL,
+  value       DOUBLE NOT NULL,
+  recorded_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  INDEX idx_metric_lookup (type, identifier, field, recorded_at)
+);

@@ -47,6 +47,19 @@ func main() {
 		}
 	}
 
+	// MetricStore for dashboard chart data
+	var metricStore *store.MetricStore
+	if cfg.MySQLDSN != "" {
+		ms, err := store.NewMetricStore(cfg.MySQLDSN)
+		if err != nil {
+			log.Printf("⚠️ MetricStore disabled: %v", err)
+		} else {
+			metricStore = ms
+			defer metricStore.Close()
+			log.Println("📈 MetricStore connected — dashboard endpoints active")
+		}
+	}
+
 	// CORS middleware
 	corsHandler := func(next http.HandlerFunc) http.HandlerFunc {
 		return func(w http.ResponseWriter, r *http.Request) {
@@ -63,8 +76,16 @@ func main() {
 		}
 	}
 
-	// Setup routes with CORS (data from files and/or Elasticsearch).
-	// More-specific prefixes must be registered before the catch-all /api/logs/.
+	// Metrics routes (register before /api/logs/ catch-all)
+	http.HandleFunc("/api/metrics/history", corsHandler(func(w http.ResponseWriter, r *http.Request) {
+		handleGetMetricHistory(w, r, metricStore)
+	}))
+
+	http.HandleFunc("/api/metrics", corsHandler(func(w http.ResponseWriter, r *http.Request) {
+		handleListMetrics(w, r, metricStore)
+	}))
+
+	// Log routes
 	http.HandleFunc("/api/logs/dates", corsHandler(func(w http.ResponseWriter, r *http.Request) {
 		handleGetDates(w, r, logDir, esLog)
 	}))
@@ -93,6 +114,82 @@ func maskEmails(s string) string {
 	return emailRegex.ReplaceAllStringFunc(s, func(email string) string {
 		return "[email@address]"
 	})
+}
+
+// parseRange converts a range string (1h, 3h, 12h, 1d, 3d, 1w, 1m) to a since time.
+func parseRange(rangeStr string) time.Time {
+	now := time.Now().UTC()
+	switch rangeStr {
+	case "1h":
+		return now.Add(-1 * time.Hour)
+	case "3h":
+		return now.Add(-3 * time.Hour)
+	case "12h":
+		return now.Add(-12 * time.Hour)
+	case "1d":
+		return now.Add(-24 * time.Hour)
+	case "3d":
+		return now.Add(-72 * time.Hour)
+	case "1w":
+		return now.Add(-7 * 24 * time.Hour)
+	case "1m":
+		return now.Add(-30 * 24 * time.Hour)
+	default:
+		return now.Add(-24 * time.Hour)
+	}
+}
+
+// handleListMetrics returns all distinct (type, identifier, label, field) combinations.
+// Route: GET /api/metrics
+func handleListMetrics(w http.ResponseWriter, r *http.Request, ms *store.MetricStore) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	metrics, err := ms.ListMetrics()
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to list metrics: %v", err), http.StatusInternalServerError)
+		return
+	}
+	if metrics == nil {
+		metrics = []store.MetricInfo{}
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(metrics)
+}
+
+// handleGetMetricHistory returns time-series data for a given metric and time range.
+// Route: GET /api/metrics/history?type=&identifier=&field=&range=1d
+func handleGetMetricHistory(w http.ResponseWriter, r *http.Request, ms *store.MetricStore) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	q := r.URL.Query()
+	metricType := strings.TrimSpace(q.Get("type"))
+	identifier := strings.TrimSpace(q.Get("identifier"))
+	field := strings.TrimSpace(q.Get("field"))
+	rangeStr := strings.TrimSpace(q.Get("range"))
+
+	if metricType == "" || identifier == "" || field == "" {
+		http.Error(w, "type, identifier, and field are required", http.StatusBadRequest)
+		return
+	}
+
+	since := parseRange(rangeStr)
+
+	points, err := ms.GetMetricHistory(metricType, identifier, field, since)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to get metric history: %v", err), http.StatusInternalServerError)
+		return
+	}
+	if points == nil {
+		points = []store.MetricPoint{}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{"data": points})
 }
 
 func handleGetDates(w http.ResponseWriter, r *http.Request, logDir string, esLog *store.ESClient) {

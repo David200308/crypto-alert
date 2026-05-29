@@ -29,7 +29,7 @@ export default defineConfig({
     port: 3030,
     host: '0.0.0.0', // Allow external connections
     allowedHosts: [
-      'crypto-alert.log.skyproton.com',
+      'crypto.alert.skyproton.com',
     ],
     proxy: {
       '/api': {

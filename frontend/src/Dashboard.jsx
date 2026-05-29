@@ -388,19 +388,19 @@ export default function Dashboard({ theme = 'dark' }) {
   return (
     <div className="flex flex-col flex-1 overflow-hidden">
       {/* Toolbar */}
-      <div className="px-8 py-3 bg-theme-surface border-b border-theme-border flex items-center justify-between gap-4 flex-wrap shrink-0">
+      <div className="px-4 md:px-8 py-3 bg-theme-surface border-b border-theme-border flex items-center justify-between gap-3 flex-wrap shrink-0">
         <div className="flex items-center gap-2 text-theme-text-muted text-sm">
           <BarChart3 className="w-4 h-4 text-blue-400/70" />
           <span>
             {loading ? 'Loading…' : `${enabledMetrics.length} metric${enabledMetrics.length !== 1 ? 's' : ''}`}
           </span>
         </div>
-        <div className="flex gap-1 bg-theme-input rounded-lg p-1 border border-theme-border">
+        <div className="flex gap-0.5 sm:gap-1 bg-theme-input rounded-lg p-1 border border-theme-border overflow-x-auto max-w-full">
           {TIME_RANGES.map(({ label, value }) => (
             <button
               key={value}
               onClick={() => setRange(value)}
-              className={`px-3 py-1.5 rounded-md text-xs font-medium transition-all duration-150 ${
+              className={`px-2 sm:px-3 py-1.5 rounded-md text-xs font-medium transition-all duration-150 whitespace-nowrap ${
                 range === value
                   ? 'bg-blue-500 text-white shadow-[0_0_10px_rgba(59,130,246,0.35)]'
                   : 'text-theme-text-muted hover:text-theme-text hover:bg-theme-card'
@@ -413,7 +413,7 @@ export default function Dashboard({ theme = 'dark' }) {
       </div>
 
       {/* Content */}
-      <div className="flex-1 overflow-y-auto p-8 bg-theme-bg scrollbar-thin">
+      <div className="flex-1 overflow-y-auto p-4 md:p-8 bg-theme-bg scrollbar-thin">
         {loading && (
           <div className="flex items-center justify-center gap-3 py-16 text-theme-text-muted text-sm">
             <Loader className="w-5 h-5 animate-spin-slow text-blue-400" />

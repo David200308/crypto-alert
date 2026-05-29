@@ -135,19 +135,19 @@ function App() {
   return (
     <div className="flex flex-col h-screen overflow-hidden bg-theme-bg text-theme-text">
       {/* Header */}
-      <header className={`px-8 py-4 shrink-0 border-b border-theme-border transition-colors ${
+      <header className={`px-4 md:px-8 py-3 md:py-4 shrink-0 border-b border-theme-border transition-colors ${
         theme === 'dark'
           ? 'bg-gradient-to-r from-[#18182a] via-[#1c1c30] to-[#18223a] shadow-[0_1px_30px_rgba(59,130,246,0.1)]'
           : 'bg-theme-surface shadow-sm'
       }`}>
-        <div className="flex justify-between items-center max-w-full flex-col md:flex-row gap-4 md:gap-0">
-          <div className="flex items-center gap-6">
+        <div className="flex justify-between items-center max-w-full flex-col md:flex-row gap-3 md:gap-0">
+          <div className="flex items-center gap-3 md:gap-6 w-full md:w-auto justify-between md:justify-start">
             {/* Brand */}
             <div className="flex items-center gap-2.5">
               <img
                 src={theme === 'dark' ? '/logo-white-front-no-background.svg' : '/logo-black-front-no-background.svg'}
                 alt="CryptoAlert logo"
-                className="h-[60px] w-auto"
+                className="h-9 md:h-[60px] w-auto"
               />
               <h1 className="text-xl font-bold text-theme-text m-0 tracking-tight">
                 Crypto<span className="text-blue-500">Alert</span>
@@ -181,10 +181,10 @@ function App() {
             </div>
           </div>
 
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-3 w-full md:w-auto justify-end md:justify-start">
             {/* Log controls */}
             {view === 'logs' && (
-              <div className="flex gap-3 items-center w-full md:w-auto flex-col md:flex-row">
+              <div className="flex gap-3 items-center w-full md:w-auto flex-col sm:flex-row">
                 <div className="flex items-center gap-2 bg-theme-input px-3 py-2 rounded-lg border border-theme-border w-full md:w-auto hover:border-blue-500/40 transition-colors">
                   <Calendar className="w-4 h-4 text-blue-500/70" />
                   <select
@@ -230,7 +230,7 @@ function App() {
       {/* Logs view */}
       {view === 'logs' && (
         <>
-          <div className="flex justify-between items-center px-8 py-3 bg-theme-surface border-b border-theme-border gap-4 flex-wrap shrink-0">
+          <div className="flex justify-between items-center px-4 md:px-8 py-3 bg-theme-surface border-b border-theme-border gap-4 flex-wrap shrink-0">
             <div className="flex items-center bg-theme-input border border-theme-border-subtle rounded-lg px-3 py-2 flex-1 min-w-[200px] max-w-[480px] focus-within:border-blue-500/50 transition-colors">
               <Search className="w-4 h-4 text-blue-400/60 mr-2 shrink-0" />
               <input
@@ -255,7 +255,7 @@ function App() {
             </label>
           </div>
 
-          <div className="flex-1 overflow-y-auto px-8 py-4 bg-theme-bg scrollbar-thin" ref={scrollContainerRef}>
+          <div className="flex-1 overflow-y-auto px-4 md:px-8 py-4 bg-theme-bg scrollbar-thin" ref={scrollContainerRef}>
             {error && (
               <div className="flex items-center gap-2 p-4 bg-red-500/10 border border-red-500/40 rounded-lg text-red-400 mb-4">
                 <AlertCircle className="w-5 h-5 shrink-0" />
@@ -291,7 +291,7 @@ function App() {
             <div ref={logEndRef} />
           </div>
 
-          <footer className="bg-theme-surface border-t border-theme-border px-8 py-3 shrink-0">
+          <footer className="bg-theme-surface border-t border-theme-border px-4 md:px-8 py-3 shrink-0">
             <div className="flex justify-between items-center text-theme-text-muted text-xs flex-col md:flex-row gap-2 md:gap-0">
               <span className="font-mono">
                 {searchTerm ? <><span className="text-blue-400/70">search:</span> &ldquo;{searchTerm}&rdquo; &mdash; </> : ''}{logs.length} entries

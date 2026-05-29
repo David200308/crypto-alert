@@ -43,3 +43,4 @@ logs/
 
 insert_config.sql
 deploy.sh
+.claude/

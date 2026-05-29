@@ -104,12 +104,10 @@ function MetricCard({ metric, range }) {
   const typeStyle  = TYPE_COLORS[metric.type] || TYPE_COLORS.token
   const lineColor  = getLineColor(metric.field)
 
-  // Reduce x-axis tick density for large datasets
   const tickInterval = data.length > 60 ? Math.floor(data.length / 8) : 'preserveStartEnd'
 
   return (
     <div className="bg-dark-surface border border-dark-border rounded-xl p-5 flex flex-col gap-3 hover:border-[#3a3a5e] transition-colors">
-      {/* Card header */}
       <div className="flex justify-between items-start gap-2">
         <div className="flex-1 min-w-0">
           <div className="text-dark-text font-semibold text-sm leading-tight truncate" title={metric.label}>
@@ -130,7 +128,6 @@ function MetricCard({ metric, range }) {
         )}
       </div>
 
-      {/* Chart body */}
       {loading && (
         <div className="flex items-center justify-center h-[130px] text-dark-text-muted">
           <Loader className="w-4 h-4 animate-spin-slow" />
@@ -194,6 +191,148 @@ function MetricCard({ metric, range }) {
   )
 }
 
+// Prediction market card: fetches BUY, MIDPOINT, SELL and renders them as one multi-line chart.
+function PredictMarketCard({ group, range }) {
+  const [data, setData]       = useState([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError]     = useState(null)
+
+  const fields = group.fields
+
+  useEffect(() => {
+    let cancelled = false
+    setLoading(true)
+    setError(null)
+
+    const promises = fields.map(field => {
+      const params = new URLSearchParams({
+        type:       group.type,
+        identifier: group.identifier,
+        field,
+        range,
+      })
+      return fetch(`/api/metrics/history?${params}`)
+        .then(r => r.ok ? r.json() : Promise.reject(r.statusText))
+        .then(json => ({ field, points: json.data || [] }))
+    })
+
+    Promise.all(promises)
+      .then(results => {
+        if (cancelled) return
+        const byTime = {}
+        results.forEach(({ field, points }) => {
+          points.forEach(p => {
+            const key = formatTimestamp(p.recorded_at, range)
+            if (!byTime[key]) byTime[key] = { time: key, ts: p.recorded_at }
+            byTime[key][field] = p.value
+          })
+        })
+        const merged = Object.values(byTime).sort((a, b) => a.ts.localeCompare(b.ts))
+        setData(merged)
+      })
+      .catch(e => { if (!cancelled) setError(String(e)) })
+      .finally(() => { if (!cancelled) setLoading(false) })
+
+    return () => { cancelled = true }
+  }, [group.type, group.identifier, fields.join(','), range])
+
+  const tickInterval = data.length > 60 ? Math.floor(data.length / 8) : 'preserveStartEnd'
+
+  const latestRow = data.length > 0 ? data[data.length - 1] : null
+
+  return (
+    <div className="bg-dark-surface border border-dark-border rounded-xl p-5 flex flex-col gap-3 hover:border-[#3a3a5e] transition-colors">
+      <div className="flex justify-between items-start gap-2">
+        <div className="flex-1 min-w-0">
+          <div className="text-dark-text font-semibold text-sm leading-tight truncate" title={group.label}>
+            {group.label}
+          </div>
+          <div className="flex items-center gap-2 mt-1.5">
+            <span className="text-xs px-1.5 py-0.5 rounded font-medium bg-violet-500/20 text-violet-400">
+              Predict
+            </span>
+            <span className="text-dark-text-secondary text-xs">{fields.join(' · ')}</span>
+          </div>
+        </div>
+        {latestRow && (
+          <div className="text-right shrink-0 flex flex-col gap-0.5">
+            {fields.map(field => latestRow[field] != null && (
+              <div key={field} className="flex items-center gap-1 justify-end">
+                <span className="font-mono text-xs" style={{ color: getLineColor(field) }}>
+                  {formatValue(latestRow[field], field)}
+                </span>
+                <span className="text-dark-text-muted text-xs">{field}</span>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {loading && (
+        <div className="flex items-center justify-center h-[130px] text-dark-text-muted">
+          <Loader className="w-4 h-4 animate-spin-slow" />
+        </div>
+      )}
+
+      {error && (
+        <div className="flex items-center justify-center h-[130px] text-red-400 text-xs gap-1.5">
+          <AlertCircle className="w-4 h-4 shrink-0" />
+          <span className="truncate">{error}</span>
+        </div>
+      )}
+
+      {!loading && !error && data.length === 0 && (
+        <div className="flex items-center justify-center h-[130px] text-dark-text-secondary text-xs">
+          No data for this period
+        </div>
+      )}
+
+      {!loading && !error && data.length > 0 && (
+        <ResponsiveContainer width="100%" height={130}>
+          <LineChart data={data} margin={{ top: 4, right: 4, left: -16, bottom: 0 }}>
+            <CartesianGrid strokeDasharray="3 3" stroke="#2a2a3e" vertical={false} />
+            <XAxis
+              dataKey="time"
+              tick={{ fill: '#6b6b7e', fontSize: 10 }}
+              tickLine={false}
+              axisLine={false}
+              interval={tickInterval}
+            />
+            <YAxis
+              tick={{ fill: '#6b6b7e', fontSize: 10 }}
+              tickLine={false}
+              axisLine={false}
+              tickFormatter={(v) => `${(v * 100).toFixed(0)}%`}
+              width={42}
+            />
+            <Tooltip
+              contentStyle={{
+                background: '#141414',
+                border: '1px solid #2a2a3e',
+                borderRadius: 8,
+                fontSize: 12,
+              }}
+              labelStyle={{ color: '#8b8b9e', marginBottom: 4 }}
+              formatter={(v, name) => [formatValue(v, name), name]}
+            />
+            {fields.map(field => (
+              <Line
+                key={field}
+                type="monotone"
+                dataKey={field}
+                stroke={getLineColor(field)}
+                dot={false}
+                strokeWidth={2}
+                isAnimationActive={false}
+              />
+            ))}
+          </LineChart>
+        </ResponsiveContainer>
+      )}
+    </div>
+  )
+}
+
 function CollapsibleSection({ title, children, defaultOpen = true }) {
   const [open, setOpen] = useState(defaultOpen)
   return (
@@ -228,9 +367,22 @@ export default function Dashboard() {
       .finally(() => setLoading(false))
   }, [])
 
-  const tokenMetrics   = metrics.filter(m => m.type === 'token')
-  const defiMetrics    = metrics.filter(m => m.type === 'defi')
-  const predictMetrics = metrics.filter(m => m.type === 'predict')
+  const enabledMetrics = metrics.filter(m => m.enabled !== false)
+  const tokenMetrics   = enabledMetrics.filter(m => m.type === 'token')
+  const defiMetrics    = enabledMetrics.filter(m => m.type === 'defi')
+
+  // Group predict metrics by identifier so BUY/MIDPOINT/SELL appear on one chart
+  const predictGroups = Object.values(
+    enabledMetrics
+      .filter(m => m.type === 'predict')
+      .reduce((acc, m) => {
+        if (!acc[m.identifier]) {
+          acc[m.identifier] = { type: m.type, identifier: m.identifier, label: m.label, fields: [] }
+        }
+        acc[m.identifier].fields.push(m.field)
+        return acc
+      }, {})
+  )
 
   return (
     <div className="flex flex-col flex-1 overflow-hidden">
@@ -239,7 +391,7 @@ export default function Dashboard() {
         <div className="flex items-center gap-2 text-dark-text-muted text-sm">
           <BarChart3 className="w-4 h-4" />
           <span>
-            {loading ? 'Loading…' : `${metrics.length} metric${metrics.length !== 1 ? 's' : ''}`}
+            {loading ? 'Loading…' : `${enabledMetrics.length} metric${enabledMetrics.length !== 1 ? 's' : ''}`}
           </span>
         </div>
         <div className="flex gap-1">
@@ -275,7 +427,7 @@ export default function Dashboard() {
           </div>
         )}
 
-        {!loading && !error && metrics.length === 0 && (
+        {!loading && !error && enabledMetrics.length === 0 && (
           <div className="text-center py-16 text-dark-text-secondary">
             No metrics yet — data appears once the monitoring service starts collecting.
           </div>
@@ -309,13 +461,13 @@ export default function Dashboard() {
           </CollapsibleSection>
         )}
 
-        {predictMetrics.length > 0 && (
+        {predictGroups.length > 0 && (
           <CollapsibleSection title="Prediction Markets">
             <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-              {predictMetrics.map(m => (
-                <MetricCard
-                  key={`${m.type}-${m.identifier}-${m.field}`}
-                  metric={m}
+              {predictGroups.map(group => (
+                <PredictMarketCard
+                  key={`predict-${group.identifier}`}
+                  group={group}
                   range={range}
                 />
               ))}

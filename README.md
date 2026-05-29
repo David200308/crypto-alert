@@ -24,19 +24,13 @@ crypto-alert/
 ├── docker-compose.yml
 ├── Dockerfile
 ├── frontend
-│   ├── dist
-│   │   ├── assets
-│   │   │   ├── index-C8hVq9ua.css
-│   │   │   └── index-ECa1PYB9.js
-│   │   ├── index.html
-│   │   └── vite.svg
 │   ├── Dockerfile
 │   ├── index.html
 │   ├── package-lock.json
 │   ├── package.json
 │   ├── postcss.config.js
 │   ├── public
-│   │   └── vite.svg
+│   │   └── logo.svg
 │   ├── README.md
 │   ├── src
 │   │   ├── App.jsx
@@ -100,25 +94,21 @@ crypto-alert/
 
 ## Web3 Data Integration
 
-
 | Type              | Oracle | Protocol / DApp   | Market / Vault | Version | Chain          | Price | TVL  | APY  | UTILIZATION | LIQUIDITY |
 | ----------------- | ------ | ----------------- | -------------- | ------- | -------------- | ----- | ---- | ---- | ----------- | --------- |
-| Token             | Pyth   |                   |                |         |                | ✔️     |      |      |             |           |
-| DeFi              |        | AAVE              | Market         | V3      | ETH, Base, ARB |       | ✔️    | ✔️    | ✔️           | ✔️         |
-| DeFi              |        | Morpho            | Market         | V1      | ETH, Base, ARB |       | ✔️    |      | ✔️           | ✔️         |
-| DeFi              |        | Morpho            | Vault          | V1      | ETH, Base, ARB |       | ✔️    | ✔️    | ✔️           | ✔️         |
-| DeFi              |        | Morpho            | Vault          | V2      | ETH, Base, ARB |       | ✔️    | ✔️    | ✔️           | ✔️         |
-| DeFi              |        | Kamino            | Vault          | V2      | Solana         |       | ✔️    | ✔️    | ✔️           | ✔️         |
-| DeFi              |        | Pendle            | PT Market      | V2      |                |       | ✔️    | ✔️    |             |           |
-| DeFi              |        | Hyperliquid Vault | Vault          |         | Hyperliquid L1 |       | ✔️    | ✔️    |             |           |
-| Prediction Market |        | Polymarket        |                |         |                | ✔️     |      |      |             |           |
-
+| Token             | Pyth   |                   |                |         |                | ✔️  |      |      |             |           |
+| DeFi              |        | AAVE              | Market         | V3      | ETH, Base, ARB |       | ✔️ | ✔️ | ✔️        | ✔️      |
+| DeFi              |        | Morpho            | Market         | V1      | ETH, Base, ARB |       | ✔️ |      | ✔️        | ✔️      |
+| DeFi              |        | Morpho            | Vault          | V1      | ETH, Base, ARB |       | ✔️ | ✔️ | ✔️        | ✔️      |
+| DeFi              |        | Morpho            | Vault          | V2      | ETH, Base, ARB |       | ✔️ | ✔️ | ✔️        | ✔️      |
+| DeFi              |        | Kamino            | Vault          | V2      | Solana         |       | ✔️ | ✔️ | ✔️        | ✔️      |
+| DeFi              |        | Pendle            | PT Market      | V2      |                |       | ✔️ | ✔️ |             |           |
+| DeFi              |        | Hyperliquid Vault | Vault          |         | Hyperliquid L1 |       | ✔️ | ✔️ |             |           |
+| Prediction Market |        | Polymarket        |                |         |                | ✔️  |      |      |             |           |
 
 ## Message Channel Integration
-
 
 | Type  | Provider |
 | ----- | -------- |
 | Email | Resend   |
 | Bot   | Telegram |
-

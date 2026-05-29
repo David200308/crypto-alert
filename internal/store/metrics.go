@@ -18,6 +18,7 @@ type MetricInfo struct {
 	Identifier string `json:"identifier"`
 	Label      string `json:"label"`
 	Field      string `json:"field"`
+	Enabled    bool   `json:"enabled"`
 }
 
 type MetricStore struct {
@@ -94,9 +95,33 @@ func (s *MetricStore) ListMetrics() ([]MetricInfo, error) {
 	if s == nil {
 		return nil, nil
 	}
-	rows, err := s.db.Query(
-		`SELECT DISTINCT type, identifier, label, field FROM metric_snapshots ORDER BY type, identifier, field`,
-	)
+	rows, err := s.db.Query(`
+		SELECT DISTINCT ms.type, ms.identifier, ms.label, ms.field,
+			CASE ms.type
+				WHEN 'token' THEN COALESCE(
+					(SELECT MAX(CAST(enabled AS UNSIGNED))
+					 FROM alert_rule_token_config WHERE symbol = ms.identifier), 1)
+				WHEN 'predict' THEN COALESCE(
+					(SELECT MAX(CAST(enabled AS UNSIGNED))
+					 FROM alert_rule_predict_market_config
+					 WHERE JSON_UNQUOTE(JSON_EXTRACT(params, '$.token_id')) = ms.identifier), 1)
+				WHEN 'defi' THEN COALESCE(
+					(SELECT MAX(CAST(enabled AS UNSIGNED))
+					 FROM alert_rule_defi_config
+					 WHERE field = ms.field
+					 AND CONCAT(protocol, '-', version, '-', chain_id, '-',
+						 COALESCE(
+							 JSON_UNQUOTE(JSON_EXTRACT(params, '$.vault_token_address')),
+							 JSON_UNQUOTE(JSON_EXTRACT(params, '$.ledger_address')),
+							 JSON_UNQUOTE(JSON_EXTRACT(params, '$.market_id')),
+							 JSON_UNQUOTE(JSON_EXTRACT(params, '$.market_token_contract')),
+							 ''
+						 )
+					 ) = ms.identifier), 1)
+				ELSE 1
+			END AS enabled
+		FROM metric_snapshots ms
+		ORDER BY ms.type, ms.identifier, ms.field`)
 	if err != nil {
 		return nil, err
 	}
@@ -105,9 +130,11 @@ func (s *MetricStore) ListMetrics() ([]MetricInfo, error) {
 	var metrics []MetricInfo
 	for rows.Next() {
 		var m MetricInfo
-		if err := rows.Scan(&m.Type, &m.Identifier, &m.Label, &m.Field); err != nil {
+		var enabled int
+		if err := rows.Scan(&m.Type, &m.Identifier, &m.Label, &m.Field, &enabled); err != nil {
 			return nil, err
 		}
+		m.Enabled = enabled != 0
 		metrics = append(metrics, m)
 	}
 	return metrics, rows.Err()

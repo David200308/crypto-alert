@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import {
-  LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend,
+  LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
 } from 'recharts'
 import { BarChart3, Loader, AlertCircle, ChevronDown, ChevronRight } from 'lucide-react'
 
@@ -14,7 +14,6 @@ const TIME_RANGES = [
   { label: '1M',  value: '1m'  },
 ]
 
-// Format x-axis timestamps based on selected time range
 function formatTimestamp(isoStr, range) {
   const d = new Date(isoStr)
   const pad = (n) => String(n).padStart(2, '0')
@@ -27,7 +26,6 @@ function formatTimestamp(isoStr, range) {
   return `${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
 }
 
-// Smart value formatter for tooltip and y-axis labels
 function formatValue(value, field) {
   if (value === null || value === undefined) return '—'
   const f = field?.toUpperCase()
@@ -37,23 +35,17 @@ function formatValue(value, field) {
     if (value >= 1e3)  return `$${(value / 1e3).toFixed(2)}K`
     return `$${value.toFixed(4)}`
   }
-  if (f === 'APY' || f === 'UTILIZATION') {
-    return `${value.toFixed(2)}%`
-  }
-  if (f === 'MIDPOINT' || f === 'BUY' || f === 'SELL') {
-    return `${(value * 100).toFixed(2)}%`
-  }
+  if (f === 'APY' || f === 'UTILIZATION') return `${value.toFixed(2)}%`
+  if (f === 'MIDPOINT' || f === 'BUY' || f === 'SELL') return `${(value * 100).toFixed(2)}%`
   return value.toFixed(4)
 }
 
-// Type badge colors
 const TYPE_COLORS = {
-  token:   { bg: 'bg-blue-500/20',    text: 'text-blue-400',   label: 'Token'  },
-  defi:    { bg: 'bg-emerald-500/20', text: 'text-emerald-400', label: 'DeFi'  },
-  predict: { bg: 'bg-violet-500/20',  text: 'text-violet-400',  label: 'Predict' },
+  token:   { bg: 'bg-blue-500/15',    text: 'text-blue-400',    border: 'border-blue-500/20',    label: 'Token'   },
+  defi:    { bg: 'bg-emerald-500/15', text: 'text-emerald-400', border: 'border-emerald-500/20', label: 'DeFi'    },
+  predict: { bg: 'bg-violet-500/15',  text: 'text-violet-400',  border: 'border-violet-500/20',  label: 'Predict' },
 }
 
-// Chart line colors per field type
 function getLineColor(field) {
   const f = field?.toUpperCase()
   if (f === 'PRICE')       return '#60a5fa'
@@ -67,7 +59,13 @@ function getLineColor(field) {
   return '#60a5fa'
 }
 
-function MetricCard({ metric, range }) {
+function chartColors(theme) {
+  return theme === 'light'
+    ? { grid: '#e8e8f5', tick: '#8a8aae', tooltipBg: '#ffffff', tooltipBorder: '#e0e0f0', tooltipLabel: '#6a6a8e' }
+    : { grid: '#1e1e36', tick: '#5a5a7e', tooltipBg: '#0e0e1e', tooltipBorder: '#1e1e3a', tooltipLabel: '#6b6b9e' }
+}
+
+function MetricCard({ metric, range, theme }) {
   const [data, setData]       = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError]     = useState(null)
@@ -89,9 +87,9 @@ function MetricCard({ metric, range }) {
       .then(json => {
         if (cancelled) return
         setData((json.data || []).map(p => ({
-          raw:   p.value,
-          time:  formatTimestamp(p.recorded_at, range),
-          ts:    p.recorded_at,
+          raw:  p.value,
+          time: formatTimestamp(p.recorded_at, range),
+          ts:   p.recorded_at,
         })))
       })
       .catch(e => { if (!cancelled) setError(String(e)) })
@@ -100,37 +98,39 @@ function MetricCard({ metric, range }) {
     return () => { cancelled = true }
   }, [metric.type, metric.identifier, metric.field, range])
 
-  const latest     = data.length > 0 ? data[data.length - 1].raw : null
-  const typeStyle  = TYPE_COLORS[metric.type] || TYPE_COLORS.token
-  const lineColor  = getLineColor(metric.field)
-
+  const latest    = data.length > 0 ? data[data.length - 1].raw : null
+  const typeStyle = TYPE_COLORS[metric.type] || TYPE_COLORS.token
+  const lineColor = getLineColor(metric.field)
+  const cc        = chartColors(theme)
   const tickInterval = data.length > 60 ? Math.floor(data.length / 8) : 'preserveStartEnd'
 
   return (
-    <div className="bg-dark-surface border border-dark-border rounded-xl p-5 flex flex-col gap-3 hover:border-[#3a3a5e] transition-colors">
+    <div className="bg-theme-card border border-theme-border rounded-xl p-5 flex flex-col gap-3 hover:border-theme-border-focus hover:shadow-[0_0_20px_rgba(59,130,246,0.06)] transition-all duration-200 group">
       <div className="flex justify-between items-start gap-2">
         <div className="flex-1 min-w-0">
-          <div className="text-dark-text font-semibold text-sm leading-tight truncate" title={metric.label}>
+          <div className="text-theme-text font-semibold text-sm leading-tight truncate" title={metric.label}>
             {metric.label}
           </div>
           <div className="flex items-center gap-2 mt-1.5">
-            <span className={`text-xs px-1.5 py-0.5 rounded font-medium ${typeStyle.bg} ${typeStyle.text}`}>
+            <span className={`text-xs px-1.5 py-0.5 rounded border font-medium ${typeStyle.bg} ${typeStyle.text} ${typeStyle.border}`}>
               {typeStyle.label}
             </span>
-            <span className="text-dark-text-secondary text-xs">{metric.field}</span>
+            <span className="text-theme-text-secondary text-xs">{metric.field}</span>
           </div>
         </div>
         {latest !== null && (
           <div className="text-right shrink-0">
-            <div className="text-dark-text font-mono text-sm">{formatValue(latest, metric.field)}</div>
-            <div className="text-dark-text-muted text-xs">latest</div>
+            <div className="text-theme-text font-mono text-sm font-semibold" style={{ color: lineColor }}>
+              {formatValue(latest, metric.field)}
+            </div>
+            <div className="text-theme-text-secondary text-xs">latest</div>
           </div>
         )}
       </div>
 
       {loading && (
-        <div className="flex items-center justify-center h-[130px] text-dark-text-muted">
-          <Loader className="w-4 h-4 animate-spin-slow" />
+        <div className="flex items-center justify-center h-[130px] text-theme-text-muted">
+          <Loader className="w-4 h-4 animate-spin-slow text-blue-400/50" />
         </div>
       )}
 
@@ -142,7 +142,7 @@ function MetricCard({ metric, range }) {
       )}
 
       {!loading && !error && data.length === 0 && (
-        <div className="flex items-center justify-center h-[130px] text-dark-text-secondary text-xs">
+        <div className="flex items-center justify-center h-[130px] text-theme-text-secondary text-xs">
           No data for this period
         </div>
       )}
@@ -150,16 +150,16 @@ function MetricCard({ metric, range }) {
       {!loading && !error && data.length > 0 && (
         <ResponsiveContainer width="100%" height={130}>
           <LineChart data={data} margin={{ top: 4, right: 4, left: -16, bottom: 0 }}>
-            <CartesianGrid strokeDasharray="3 3" stroke="#2a2a3e" vertical={false} />
+            <CartesianGrid strokeDasharray="3 3" stroke={cc.grid} vertical={false} />
             <XAxis
               dataKey="time"
-              tick={{ fill: '#6b6b7e', fontSize: 10 }}
+              tick={{ fill: cc.tick, fontSize: 10 }}
               tickLine={false}
               axisLine={false}
               interval={tickInterval}
             />
             <YAxis
-              tick={{ fill: '#6b6b7e', fontSize: 10 }}
+              tick={{ fill: cc.tick, fontSize: 10 }}
               tickLine={false}
               axisLine={false}
               tickFormatter={(v) => formatValue(v, metric.field)}
@@ -167,12 +167,12 @@ function MetricCard({ metric, range }) {
             />
             <Tooltip
               contentStyle={{
-                background: '#141414',
-                border: '1px solid #2a2a3e',
+                background: cc.tooltipBg,
+                border: `1px solid ${cc.tooltipBorder}`,
                 borderRadius: 8,
                 fontSize: 12,
               }}
-              labelStyle={{ color: '#8b8b9e', marginBottom: 4 }}
+              labelStyle={{ color: cc.tooltipLabel, marginBottom: 4 }}
               itemStyle={{ color: lineColor }}
               formatter={(v) => [formatValue(v, metric.field), metric.field]}
             />
@@ -191,8 +191,7 @@ function MetricCard({ metric, range }) {
   )
 }
 
-// Prediction market card: fetches BUY, MIDPOINT, SELL and renders them as one multi-line chart.
-function PredictMarketCard({ group, range }) {
+function PredictMarketCard({ group, range, theme }) {
   const [data, setData]       = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError]     = useState(null)
@@ -237,31 +236,31 @@ function PredictMarketCard({ group, range }) {
   }, [group.type, group.identifier, fields.join(','), range])
 
   const tickInterval = data.length > 60 ? Math.floor(data.length / 8) : 'preserveStartEnd'
-
-  const latestRow = data.length > 0 ? data[data.length - 1] : null
+  const latestRow    = data.length > 0 ? data[data.length - 1] : null
+  const cc           = chartColors(theme)
 
   return (
-    <div className="bg-dark-surface border border-dark-border rounded-xl p-5 flex flex-col gap-3 hover:border-[#3a3a5e] transition-colors">
+    <div className="bg-theme-card border border-theme-border rounded-xl p-5 flex flex-col gap-3 hover:border-theme-border-focus hover:shadow-[0_0_20px_rgba(59,130,246,0.06)] transition-all duration-200">
       <div className="flex justify-between items-start gap-2">
         <div className="flex-1 min-w-0">
-          <div className="text-dark-text font-semibold text-sm leading-tight truncate" title={group.label}>
+          <div className="text-theme-text font-semibold text-sm leading-tight truncate" title={group.label}>
             {group.label}
           </div>
           <div className="flex items-center gap-2 mt-1.5">
-            <span className="text-xs px-1.5 py-0.5 rounded font-medium bg-violet-500/20 text-violet-400">
+            <span className="text-xs px-1.5 py-0.5 rounded border font-medium bg-violet-500/15 text-violet-400 border-violet-500/20">
               Predict
             </span>
-            <span className="text-dark-text-secondary text-xs">{fields.join(' · ')}</span>
+            <span className="text-theme-text-secondary text-xs">{fields.join(' · ')}</span>
           </div>
         </div>
         {latestRow && (
           <div className="text-right shrink-0 flex flex-col gap-0.5">
             {fields.map(field => latestRow[field] != null && (
-              <div key={field} className="flex items-center gap-1 justify-end">
-                <span className="font-mono text-xs" style={{ color: getLineColor(field) }}>
+              <div key={field} className="flex items-center gap-1.5 justify-end">
+                <span className="font-mono text-xs font-semibold" style={{ color: getLineColor(field) }}>
                   {formatValue(latestRow[field], field)}
                 </span>
-                <span className="text-dark-text-muted text-xs">{field}</span>
+                <span className="text-theme-text-muted text-xs">{field}</span>
               </div>
             ))}
           </div>
@@ -269,8 +268,8 @@ function PredictMarketCard({ group, range }) {
       </div>
 
       {loading && (
-        <div className="flex items-center justify-center h-[130px] text-dark-text-muted">
-          <Loader className="w-4 h-4 animate-spin-slow" />
+        <div className="flex items-center justify-center h-[130px] text-theme-text-muted">
+          <Loader className="w-4 h-4 animate-spin-slow text-blue-400/50" />
         </div>
       )}
 
@@ -282,7 +281,7 @@ function PredictMarketCard({ group, range }) {
       )}
 
       {!loading && !error && data.length === 0 && (
-        <div className="flex items-center justify-center h-[130px] text-dark-text-secondary text-xs">
+        <div className="flex items-center justify-center h-[130px] text-theme-text-secondary text-xs">
           No data for this period
         </div>
       )}
@@ -290,16 +289,16 @@ function PredictMarketCard({ group, range }) {
       {!loading && !error && data.length > 0 && (
         <ResponsiveContainer width="100%" height={130}>
           <LineChart data={data} margin={{ top: 4, right: 4, left: -16, bottom: 0 }}>
-            <CartesianGrid strokeDasharray="3 3" stroke="#2a2a3e" vertical={false} />
+            <CartesianGrid strokeDasharray="3 3" stroke={cc.grid} vertical={false} />
             <XAxis
               dataKey="time"
-              tick={{ fill: '#6b6b7e', fontSize: 10 }}
+              tick={{ fill: cc.tick, fontSize: 10 }}
               tickLine={false}
               axisLine={false}
               interval={tickInterval}
             />
             <YAxis
-              tick={{ fill: '#6b6b7e', fontSize: 10 }}
+              tick={{ fill: cc.tick, fontSize: 10 }}
               tickLine={false}
               axisLine={false}
               tickFormatter={(v) => `${(v * 100).toFixed(0)}%`}
@@ -307,12 +306,12 @@ function PredictMarketCard({ group, range }) {
             />
             <Tooltip
               contentStyle={{
-                background: '#141414',
-                border: '1px solid #2a2a3e',
+                background: cc.tooltipBg,
+                border: `1px solid ${cc.tooltipBorder}`,
                 borderRadius: 8,
                 fontSize: 12,
               }}
-              labelStyle={{ color: '#8b8b9e', marginBottom: 4 }}
+              labelStyle={{ color: cc.tooltipLabel, marginBottom: 4 }}
               formatter={(v, name) => [formatValue(v, name), name]}
             />
             {fields.map(field => (
@@ -339,19 +338,22 @@ function CollapsibleSection({ title, children, defaultOpen = true }) {
     <section className="mb-8">
       <button
         onClick={() => setOpen(o => !o)}
-        className="flex items-center gap-2 mb-4 text-dark-text-muted text-xs font-semibold uppercase tracking-widest hover:text-dark-text transition-colors w-full text-left"
+        className="flex items-center gap-2 mb-4 text-theme-text-muted text-xs font-semibold uppercase tracking-widest hover:text-theme-text transition-colors w-full text-left"
       >
         {open
           ? <ChevronDown className="w-3.5 h-3.5 shrink-0" />
           : <ChevronRight className="w-3.5 h-3.5 shrink-0" />}
         {title}
+        <span className="ml-1 text-theme-text-secondary normal-case tracking-normal font-normal">
+          ({Array.isArray(children?.props?.children) ? children.props.children.length : ''})
+        </span>
       </button>
       {open && children}
     </section>
   )
 }
 
-export default function Dashboard() {
+export default function Dashboard({ theme = 'dark' }) {
   const [metrics, setMetrics] = useState([])
   const [range, setRange]     = useState('1d')
   const [loading, setLoading] = useState(true)
@@ -371,7 +373,6 @@ export default function Dashboard() {
   const tokenMetrics   = enabledMetrics.filter(m => m.type === 'token')
   const defiMetrics    = enabledMetrics.filter(m => m.type === 'defi')
 
-  // Group predict metrics by identifier so BUY/MIDPOINT/SELL appear on one chart
   const predictGroups = Object.values(
     enabledMetrics
       .filter(m => m.type === 'predict')
@@ -387,22 +388,22 @@ export default function Dashboard() {
   return (
     <div className="flex flex-col flex-1 overflow-hidden">
       {/* Toolbar */}
-      <div className="px-8 py-3 bg-dark-surface border-b border-dark-border flex items-center justify-between gap-4 flex-wrap shrink-0">
-        <div className="flex items-center gap-2 text-dark-text-muted text-sm">
-          <BarChart3 className="w-4 h-4" />
+      <div className="px-8 py-3 bg-theme-surface border-b border-theme-border flex items-center justify-between gap-4 flex-wrap shrink-0">
+        <div className="flex items-center gap-2 text-theme-text-muted text-sm">
+          <BarChart3 className="w-4 h-4 text-blue-400/70" />
           <span>
             {loading ? 'Loading…' : `${enabledMetrics.length} metric${enabledMetrics.length !== 1 ? 's' : ''}`}
           </span>
         </div>
-        <div className="flex gap-1">
+        <div className="flex gap-1 bg-theme-input rounded-lg p-1 border border-theme-border">
           {TIME_RANGES.map(({ label, value }) => (
             <button
               key={value}
               onClick={() => setRange(value)}
-              className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${
+              className={`px-3 py-1.5 rounded-md text-xs font-medium transition-all duration-150 ${
                 range === value
-                  ? 'bg-blue-500 text-white'
-                  : 'bg-dark-surface-hover text-dark-text-muted hover:text-dark-text'
+                  ? 'bg-blue-500 text-white shadow-[0_0_10px_rgba(59,130,246,0.35)]'
+                  : 'text-theme-text-muted hover:text-theme-text hover:bg-theme-card'
               }`}
             >
               {label}
@@ -412,23 +413,23 @@ export default function Dashboard() {
       </div>
 
       {/* Content */}
-      <div className="flex-1 overflow-y-auto p-8 bg-dark-bg scrollbar-thin">
+      <div className="flex-1 overflow-y-auto p-8 bg-theme-bg scrollbar-thin">
         {loading && (
-          <div className="flex items-center justify-center gap-3 py-16 text-dark-text-muted text-base">
-            <Loader className="w-5 h-5 animate-spin-slow" />
+          <div className="flex items-center justify-center gap-3 py-16 text-theme-text-muted text-sm">
+            <Loader className="w-5 h-5 animate-spin-slow text-blue-400" />
             Loading metrics…
           </div>
         )}
 
         {error && (
-          <div className="flex items-center gap-2 p-4 bg-red-500/10 border border-red-500 rounded-lg text-red-400 mb-6">
+          <div className="flex items-center gap-2 p-4 bg-red-500/10 border border-red-500/40 rounded-lg text-red-400 mb-6">
             <AlertCircle className="w-5 h-5 shrink-0" />
             {error}
           </div>
         )}
 
         {!loading && !error && enabledMetrics.length === 0 && (
-          <div className="text-center py-16 text-dark-text-secondary">
+          <div className="text-center py-16 text-theme-text-secondary text-sm">
             No metrics yet — data appears once the monitoring service starts collecting.
           </div>
         )}
@@ -441,6 +442,7 @@ export default function Dashboard() {
                   key={`${m.type}-${m.identifier}-${m.field}`}
                   metric={m}
                   range={range}
+                  theme={theme}
                 />
               ))}
             </div>
@@ -455,6 +457,7 @@ export default function Dashboard() {
                   key={`${m.type}-${m.identifier}-${m.field}`}
                   metric={m}
                   range={range}
+                  theme={theme}
                 />
               ))}
             </div>
@@ -469,6 +472,7 @@ export default function Dashboard() {
                   key={`predict-${group.identifier}`}
                   group={group}
                   range={range}
+                  theme={theme}
                 />
               ))}
             </div>

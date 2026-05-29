@@ -1,9 +1,10 @@
 import { useState, useEffect, useRef } from 'react'
-import { RefreshCw, Calendar, AlertCircle, Loader, Search, BarChart3, ScrollText } from 'lucide-react'
+import { RefreshCw, Calendar, AlertCircle, Loader, Search, BarChart3, ScrollText, Sun, Moon } from 'lucide-react'
 import Dashboard from './Dashboard'
 
 function App() {
-  const [view, setView]                     = useState('dashboard')  // 'logs' | 'dashboard'
+  const [view, setView]                     = useState('dashboard')
+  const [theme, setTheme]                   = useState(() => localStorage.getItem('theme') || 'dark')
   const [logs, setLogs]                     = useState([])
   const [selectedDate, setSelectedDate]     = useState('')
   const [availableDates, setAvailableDates] = useState([])
@@ -11,13 +12,18 @@ function App() {
   const [loading, setLoading]               = useState(false)
   const [autoRefresh, setAutoRefresh]       = useState(true)
   const [error, setError]                   = useState(null)
-  // checkpoint: RFC3339 timestamp of the last known log entry for the selected date.
-  const checkpointRef  = useRef('')
-  const searchTermRef  = useRef('')
-  const logEndRef      = useRef(null)
+  const checkpointRef      = useRef('')
+  const searchTermRef      = useRef('')
+  const logEndRef          = useRef(null)
   const scrollContainerRef = useRef(null)
 
-  // Fetch available log dates
+  useEffect(() => {
+    document.documentElement.setAttribute('data-theme', theme)
+    localStorage.setItem('theme', theme)
+  }, [theme])
+
+  const toggleTheme = () => setTheme(t => t === 'dark' ? 'light' : 'dark')
+
   const fetchAvailableDates = async () => {
     try {
       const response = await fetch('/api/logs/dates')
@@ -90,9 +96,7 @@ function App() {
     }
   }, [logs, autoRefresh])
 
-  useEffect(() => {
-    fetchAvailableDates()
-  }, [])
+  useEffect(() => { fetchAvailableDates() }, [])
 
   useEffect(() => {
     if (selectedDate) {
@@ -129,118 +133,145 @@ function App() {
   }
 
   return (
-    <div className="flex flex-col h-screen overflow-hidden">
+    <div className="flex flex-col h-screen overflow-hidden bg-theme-bg text-theme-text">
       {/* Header */}
-      <header className="bg-gradient-to-br from-[#1a1a2e] to-[#16213e] border-b border-dark-border px-8 py-4 shadow-lg shrink-0">
+      <header className={`px-8 py-4 shrink-0 border-b border-theme-border transition-colors ${
+        theme === 'dark'
+          ? 'bg-gradient-to-r from-[#18182a] via-[#1c1c30] to-[#18223a] shadow-[0_1px_30px_rgba(59,130,246,0.1)]'
+          : 'bg-theme-surface shadow-sm'
+      }`}>
         <div className="flex justify-between items-center max-w-full flex-col md:flex-row gap-4 md:gap-0">
           <div className="flex items-center gap-6">
-            <h1 className="text-2xl font-semibold text-white m-0">Crypto Alert</h1>
+            {/* Brand */}
+            <div className="flex items-center gap-2.5">
+              <img
+                src={theme === 'dark' ? '/logo-white-front-no-background.svg' : '/logo-black-front-no-background.svg'}
+                alt="CryptoAlert logo"
+                className="h-[60px] w-auto"
+              />
+              <h1 className="text-xl font-bold text-theme-text m-0 tracking-tight">
+                Crypto<span className="text-blue-500">Alert</span>
+              </h1>
+            </div>
+
             {/* Tab navigation */}
-            <div className="flex gap-1 bg-[#0a0a1a] rounded-lg p-1">
-              <button
-                onClick={() => setView('logs')}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${
-                  view === 'logs'
-                    ? 'bg-blue-500 text-white'
-                    : 'text-dark-text-muted hover:text-dark-text'
-                }`}
-              >
-                <ScrollText className="w-3.5 h-3.5" />
-                Logs
-              </button>
+            <div className="flex gap-1 bg-theme-input rounded-lg p-1 border border-theme-border">
               <button
                 onClick={() => setView('dashboard')}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium transition-all duration-150 ${
                   view === 'dashboard'
-                    ? 'bg-blue-500 text-white'
-                    : 'text-dark-text-muted hover:text-dark-text'
+                    ? 'bg-blue-500 text-white shadow-[0_0_14px_rgba(59,130,246,0.45)]'
+                    : 'text-theme-text-muted hover:text-theme-text hover:bg-theme-card'
                 }`}
               >
                 <BarChart3 className="w-3.5 h-3.5" />
                 Dashboard
               </button>
+              <button
+                onClick={() => setView('logs')}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium transition-all duration-150 ${
+                  view === 'logs'
+                    ? 'bg-blue-500 text-white shadow-[0_0_14px_rgba(59,130,246,0.45)]'
+                    : 'text-theme-text-muted hover:text-theme-text hover:bg-theme-card'
+                }`}
+              >
+                <ScrollText className="w-3.5 h-3.5" />
+                Logs
+              </button>
             </div>
           </div>
 
-          {/* Log controls (only shown in logs view) */}
-          {view === 'logs' && (
-            <div className="flex gap-4 items-center w-full md:w-auto flex-col md:flex-row">
-              <div className="flex items-center gap-2 bg-[#2a2a3e] px-4 py-2 rounded-md border border-[#3a3a4e] w-full md:w-auto">
-                <Calendar className="w-4 h-4 text-dark-text-muted" />
-                <select
-                  value={selectedDate}
-                  onChange={(e) => setSelectedDate(e.target.value)}
-                  className="bg-transparent border-none text-dark-text text-sm cursor-pointer outline-none flex-1"
+          <div className="flex items-center gap-3">
+            {/* Log controls */}
+            {view === 'logs' && (
+              <div className="flex gap-3 items-center w-full md:w-auto flex-col md:flex-row">
+                <div className="flex items-center gap-2 bg-theme-input px-3 py-2 rounded-lg border border-theme-border w-full md:w-auto hover:border-blue-500/40 transition-colors">
+                  <Calendar className="w-4 h-4 text-blue-500/70" />
+                  <select
+                    value={selectedDate}
+                    onChange={(e) => setSelectedDate(e.target.value)}
+                    className="bg-transparent border-none text-theme-text text-sm cursor-pointer outline-none flex-1"
+                  >
+                    <option value="">Select date...</option>
+                    {availableDates.map(date => (
+                      <option key={date} value={date}>{formatDateDisplay(date)}</option>
+                    ))}
+                  </select>
+                </div>
+                <button
+                  onClick={() => {
+                    fetchAvailableDates()
+                    if (selectedDate) fetchLogs(selectedDate)
+                  }}
+                  className="flex items-center gap-2 bg-blue-500 text-white border-none px-4 py-2 rounded-lg cursor-pointer text-sm font-medium transition-all hover:bg-blue-400 hover:shadow-[0_0_14px_rgba(59,130,246,0.45)] disabled:opacity-50 disabled:cursor-not-allowed w-full md:w-auto"
+                  disabled={loading}
                 >
-                  <option value="">Select date...</option>
-                  {availableDates.map(date => (
-                    <option key={date} value={date} className="bg-[#2a2a3e] text-dark-text">
-                      {formatDateDisplay(date)}
-                    </option>
-                  ))}
-                </select>
+                  <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin-slow' : ''}`} />
+                  Refresh
+                </button>
               </div>
-              <button
-                onClick={() => {
-                  fetchAvailableDates()
-                  if (selectedDate) fetchLogs(selectedDate)
-                }}
-                className="flex items-center gap-2 bg-blue-500 text-white border-none px-4 py-2 rounded-md cursor-pointer text-sm transition-colors hover:bg-blue-600 disabled:opacity-60 disabled:cursor-not-allowed w-full md:w-auto"
-                disabled={loading}
-              >
-                <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin-slow' : ''}`} />
-                Refresh
-              </button>
-            </div>
-          )}
+            )}
+
+            {/* Theme toggle */}
+            <button
+              onClick={toggleTheme}
+              title={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
+              className="w-8 h-8 rounded-lg border border-theme-border bg-theme-input flex items-center justify-center text-theme-text-muted hover:text-theme-text hover:border-blue-500/40 transition-all"
+            >
+              {theme === 'dark' ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
+            </button>
+          </div>
         </div>
       </header>
 
       {/* Dashboard view */}
-      {view === 'dashboard' && <Dashboard />}
+      {view === 'dashboard' && <Dashboard theme={theme} />}
 
       {/* Logs view */}
       {view === 'logs' && (
         <>
-          <div className="flex justify-between items-center px-8 py-4 bg-dark-surface border-b border-dark-border gap-4 flex-wrap shrink-0">
-            <div className="flex items-center bg-dark-surface-hover border border-dark-border rounded-md px-4 py-2 flex-1 min-w-[200px] max-w-[500px]">
-              <Search className="w-4 h-4 text-dark-text-muted mr-2" />
+          <div className="flex justify-between items-center px-8 py-3 bg-theme-surface border-b border-theme-border gap-4 flex-wrap shrink-0">
+            <div className="flex items-center bg-theme-input border border-theme-border-subtle rounded-lg px-3 py-2 flex-1 min-w-[200px] max-w-[480px] focus-within:border-blue-500/50 transition-colors">
+              <Search className="w-4 h-4 text-blue-400/60 mr-2 shrink-0" />
               <input
                 type="text"
                 placeholder="Search logs..."
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
-                className="flex-1 bg-transparent border-none text-dark-text text-sm outline-none placeholder:text-dark-text-secondary"
+                className="flex-1 bg-transparent border-none text-theme-text text-sm outline-none placeholder:text-theme-text-secondary"
               />
             </div>
-            <label className="flex items-center gap-2 text-dark-text text-sm cursor-pointer">
-              <input
-                type="checkbox"
-                checked={autoRefresh}
-                onChange={(e) => setAutoRefresh(e.target.checked)}
-                className="cursor-pointer"
-              />
+            <label className="flex items-center gap-2 text-theme-text-muted text-xs cursor-pointer select-none hover:text-theme-text transition-colors">
+              <div className={`relative w-8 h-4 rounded-full transition-colors duration-200 ${autoRefresh ? 'bg-blue-500' : 'bg-theme-toggle'}`}>
+                <div className={`absolute top-0.5 w-3 h-3 rounded-full bg-white shadow transition-transform duration-200 ${autoRefresh ? 'translate-x-4' : 'translate-x-0.5'}`} />
+                <input
+                  type="checkbox"
+                  checked={autoRefresh}
+                  onChange={(e) => setAutoRefresh(e.target.checked)}
+                  className="sr-only"
+                />
+              </div>
               Auto-refresh (30s)
             </label>
           </div>
 
-          <div className="flex-1 overflow-y-auto px-8 py-4 bg-dark-bg scrollbar-thin" ref={scrollContainerRef}>
+          <div className="flex-1 overflow-y-auto px-8 py-4 bg-theme-bg scrollbar-thin" ref={scrollContainerRef}>
             {error && (
-              <div className="flex items-center gap-2 p-4 bg-red-500/10 border border-red-500 rounded-md text-red-500 mb-4">
-                <AlertCircle className="w-5 h-5" />
+              <div className="flex items-center gap-2 p-4 bg-red-500/10 border border-red-500/40 rounded-lg text-red-400 mb-4">
+                <AlertCircle className="w-5 h-5 shrink-0" />
                 {error}
               </div>
             )}
 
             {loading && logs.length === 0 && (
-              <div className="flex items-center justify-center gap-4 py-12 text-dark-text-muted text-lg">
-                <Loader className="w-6 h-6 animate-spin-slow" />
+              <div className="flex items-center justify-center gap-3 py-16 text-theme-text-muted text-sm">
+                <Loader className="w-5 h-5 animate-spin-slow text-blue-400" />
                 Loading logs...
               </div>
             )}
 
             {!loading && logs.length === 0 && !error && (
-              <div className="text-center py-12 text-dark-text-secondary text-base">
+              <div className="text-center py-16 text-theme-text-secondary text-sm">
                 {searchTerm
                   ? `No logs match "${searchTerm}" for ${formatDateDisplay(selectedDate)}`
                   : `No logs found for ${formatDateDisplay(selectedDate)}`}
@@ -250,9 +281,9 @@ function App() {
             {logs.map((entry, index) => (
               <div
                 key={entry.ts ? `${entry.ts}-${index}` : index}
-                className="p-3 mb-2 rounded-lg bg-dark-surface border-l-[3px] border-l-blue-500 hover:bg-dark-surface-hover transition-colors"
+                className="p-3 mb-1.5 rounded-lg bg-theme-card border border-theme-border border-l-[2px] border-l-blue-500/50 hover:bg-theme-card-hover hover:border-l-blue-400 transition-all duration-100 group"
               >
-                <div className="text-dark-text text-sm break-words whitespace-pre-wrap font-mono">
+                <div className="text-theme-log text-xs break-words whitespace-pre-wrap font-mono leading-relaxed group-hover:text-theme-log-hover transition-colors">
                   {typeof entry === 'string' ? entry : entry.message}
                 </div>
               </div>
@@ -260,13 +291,13 @@ function App() {
             <div ref={logEndRef} />
           </div>
 
-          <footer className="bg-dark-surface border-t border-dark-border px-8 py-3 shrink-0">
-            <div className="flex justify-between items-center text-dark-text-muted text-sm flex-col md:flex-row gap-2 md:gap-0">
-              <span>
-                {searchTerm ? `Search: "${searchTerm}" — ` : ''}Total: {logs.length} logs
+          <footer className="bg-theme-surface border-t border-theme-border px-8 py-3 shrink-0">
+            <div className="flex justify-between items-center text-theme-text-muted text-xs flex-col md:flex-row gap-2 md:gap-0">
+              <span className="font-mono">
+                {searchTerm ? <><span className="text-blue-400/70">search:</span> &ldquo;{searchTerm}&rdquo; &mdash; </> : ''}{logs.length} entries
               </span>
               {selectedDate && (
-                <span>Viewing: {formatDateDisplay(selectedDate)}</span>
+                <span className="font-mono text-theme-text-secondary">{formatDateDisplay(selectedDate)}</span>
               )}
             </div>
           </footer>

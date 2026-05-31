@@ -166,7 +166,7 @@ function App() {
           <button
             onClick={toggleTheme}
             title={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
-            className="order-2 md:order-4 ml-auto w-8 h-8 shrink-0 rounded-lg border border-theme-border bg-theme-input flex items-center justify-center text-theme-text-muted hover:text-theme-text hover:border-blue-500/40 transition-all"
+            className={`order-2 md:order-4 ${view === 'logs' ? 'ml-auto md:ml-2' : 'ml-auto'} w-8 h-8 shrink-0 rounded-lg border border-theme-border bg-theme-input flex items-center justify-center text-theme-text-muted hover:text-theme-text hover:border-blue-500/40 transition-all`}
           >
             {theme === 'dark' ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
           </button>
